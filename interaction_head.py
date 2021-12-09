@@ -255,6 +255,8 @@ class InteractionHead(nn.Module):
         s_h = scores[x].pow(p)
         s_o = scores[y].pow(p)
 
+        #print(object_class[y])
+        #print(self.object_class_to_target_class)
         # Map object class index to target class index
         # Object class index to target class index is a one-to-many mapping
         target_cls_idx = [self.object_class_to_target_class[obj.item()]

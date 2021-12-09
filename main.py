@@ -25,9 +25,9 @@ from utils import custom_collate, CustomisedDLE, DataFactory
 warnings.filterwarnings("ignore")
 
 def main(rank, args):
-
     dist.init_process_group(
-        backend="nccl",
+        #backend="nccl",
+        backend="gloo",
         init_method="env://",
         world_size=args.world_size,
         rank=rank
@@ -43,7 +43,7 @@ def main(rank, args):
 
     trainset = DataFactory(name=args.dataset, partition=args.partitions[0], data_root=args.data_root)
     testset = DataFactory(name=args.dataset, partition=args.partitions[1], data_root=args.data_root)
-
+    print("DataFactory created")
     train_loader = DataLoader(
         dataset=trainset,
         collate_fn=custom_collate, batch_size=args.batch_size,
@@ -59,16 +59,17 @@ def main(rank, args):
         num_workers=args.num_workers, pin_memory=True, drop_last=False,
         sampler=torch.utils.data.SequentialSampler(testset)
     )
+    print("Loader created")
 
-    args.human_idx = 0
+    args.human_idx = 1
     if args.dataset == 'hicodet':
         object_to_target = train_loader.dataset.dataset.object_to_verb
-        args.num_classes = 117
+        args.num_classes = 3
     elif args.dataset == 'vcoco':
         object_to_target = list(train_loader.dataset.dataset.object_to_action.values())
         args.num_classes = 24
-    
     upt = build_detector(args, object_to_target)
+
 
     if os.path.exists(args.resume):
         print(f"=> Rank {rank}: continue from saved checkpoint {args.resume}")
@@ -77,6 +78,8 @@ def main(rank, args):
     else:
         print(f"=> Rank {rank}: start from a randomly initialised model")
 
+
+    print("CustomisedDLE")
     engine = CustomisedDLE(
         upt, train_loader,
         max_norm=args.clip_max_norm,
@@ -110,10 +113,12 @@ def main(rank, args):
 
     for p in upt.detector.parameters():
         p.requires_grad = False
+
     param_dicts = [{
         "params": [p for n, p in upt.named_parameters()
         if "interaction_head" in n and p.requires_grad]
     }]
+
     optim = torch.optim.AdamW(
         param_dicts, lr=args.lr_head,
         weight_decay=args.weight_decay
@@ -140,15 +145,15 @@ if __name__ == '__main__':
     
     parser = argparse.ArgumentParser()
     parser.add_argument('--lr-head', default=1e-4, type=float)
-    parser.add_argument('--batch-size', default=2, type=int)
+    parser.add_argument('--batch-size', default=4, type=int)
     parser.add_argument('--weight-decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=20, type=int)
     parser.add_argument('--lr-drop', default=10, type=int)
     parser.add_argument('--clip-max-norm', default=0.1, type=float)
 
-    parser.add_argument('--backbone', default='resnet50', type=str)
-    parser.add_argument('--dilation', action='store_true')
-    parser.add_argument('--position-embedding', default='sine', type=str, choices=('sine', 'learned'))
+    #parser.add_argument('--backbone', default='resnet50', type=str)
+    #parser.add_argument('--dilation', action='store_true')
+    #parser.add_argument('--position-embedding', default='sine', type=str, choices=('sine', 'learned'))
 
     parser.add_argument('--repr-dim', default=512, type=int)
     parser.add_argument('--hidden-dim', default=256, type=int)
@@ -175,7 +180,8 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', default='hicodet', type=str)
     parser.add_argument('--partitions', nargs='+', default=['train2015', 'test2015'], type=str)
     parser.add_argument('--num-workers', default=2, type=int)
-    parser.add_argument('--data-root', default='./hicodet')
+    #parser.add_argument('--data-root', default='./hicodet')
+    parser.add_argument('--data-root', default='../HicoDetDataset')
 
     # training parameters
     parser.add_argument('--device', default='cuda',
@@ -190,7 +196,7 @@ if __name__ == '__main__':
     parser.add_argument('--eval', action='store_true')
     parser.add_argument('--cache', action='store_true')
     parser.add_argument('--sanity', action='store_true')
-    parser.add_argument('--box-score-thresh', default=0.2, type=float)
+    parser.add_argument('--box-score-thresh', default=0.9, type=float)
     parser.add_argument('--fg-iou-thresh', default=0.5, type=float)
     parser.add_argument('--min-instances', default=3, type=int)
     parser.add_argument('--max-instances', default=15, type=int)
@@ -198,9 +204,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
     print(args)
 
-    if args.sanity:
-        sanity_check(args)
-        sys.exit()
+    #if args.sanity:
+    #    sanity_check(args)
+    #    sys.exit()
 
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = args.port

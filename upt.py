@@ -9,6 +9,8 @@ Australian Centre for Robotic Vision
 
 import os
 import torch
+import torch.nn.functional as F
+
 import torch.distributed as dist
 
 
@@ -20,10 +22,12 @@ from ops import binary_focal_loss_with_logits
 from interaction_head import InteractionHead
 
 import sys
-sys.path.append('detr')
-from models import build_model
+#sys.path.append('detr')
+#from models import build_model
 from util import box_ops
 from util.misc import nested_tensor_from_tensor_list
+from transformers import DetrFeatureExtractor, DetrForObjectDetection
+
 
 class UPT(nn.Module):
     """
@@ -120,6 +124,10 @@ class UPT(nn.Module):
             dist.all_reduce(n_p)
             n_p = (n_p / world_size).item()
 
+        #print("-----------------")
+        #print("prior", prior)
+        #print("logits", logits)
+        #print("labels", labels)
         loss = binary_focal_loss_with_logits(
             torch.log(
                 prior / (1 + torch.exp(-logits) - prior) + 1e-8
@@ -132,7 +140,7 @@ class UPT(nn.Module):
     def prepare_region_proposals(self, results, hidden_states):
         region_props = []
         for res, hs in zip(results, hidden_states):
-            sc, lb, bx = res.values()
+            sc, lb, bx = res.values()  #Score, LAbel
 
             keep = batched_nms(bx, sc, lb, 0.5)
             sc = sc[keep].view(-1)
@@ -236,26 +244,30 @@ class UPT(nn.Module):
 
         if isinstance(images, (list, torch.Tensor)):
             images = nested_tensor_from_tensor_list(images)
-        features, pos = self.detector.backbone(images)
+        features, pos = self.detector.model.backbone(images.tensors, pixel_mask=images.mask)
 
-        src, mask = features[-1].decompose()
-        assert mask is not None
-        hs = self.detector.transformer(self.detector.input_proj(src), mask, self.detector.query_embed.weight, pos[-1])[0]
+        src, mask = features[-1]
+        assert mask is not None, "Backbone does not return downsampled pixel mask"
 
-        outputs_class = self.detector.class_embed(hs)
-        outputs_coord = self.detector.bbox_embed(hs).sigmoid()
+        outputs = self.detector.model(images.tensors, pixel_mask=images.mask)[0]
 
-        results = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
+        #projected_feature_map = self.detector.model.input_projection(src)
+        #hs = self.detector.transformer(projected_feature_map, mask, self.detector.query_embed.weight, pos[-1])[0]
+
+        outputs_class = self.detector.class_labels_classifier(outputs)
+        outputs_coord = self.detector.bbox_predictor(outputs).sigmoid()
+        results = {'pred_logits': outputs_class, 'pred_boxes': outputs_coord}
         results = self.postprocessor(results, image_sizes)
-        region_props = self.prepare_region_proposals(results, hs[-1])
+        region_props = self.prepare_region_proposals(results, outputs)
 
         logits, prior, bh, bo, objects, attn_maps = self.interaction_head(
-            features[-1].tensors, image_sizes, region_props
+            src, image_sizes, region_props
         )
         boxes = [r['boxes'] for r in region_props]
 
         if self.training:
             interaction_loss = self.compute_interaction_loss(boxes, bh, bo, logits, prior, targets)
+            print(interaction_loss)
             loss_dict = dict(
                 interaction_loss=interaction_loss
             )
@@ -264,20 +276,50 @@ class UPT(nn.Module):
         detections = self.postprocessing(boxes, bh, bo, logits, prior, objects, attn_maps, image_sizes)
         return detections
 
+
+class PostProcess(nn.Module):
+    @torch.no_grad()
+    def forward(self, outputs, target_sizes):
+        out_logits, out_bbox = outputs['pred_logits'], outputs['pred_boxes']
+
+        assert len(out_logits) == len(target_sizes)
+        assert target_sizes.shape[1] == 2
+
+        prob = F.softmax(out_logits, -1)
+        scores, labels = prob[..., :-1].max(-1)
+
+        # convert to [x0, y0, x1, y1] format
+        boxes = box_ops.box_cxcywh_to_xyxy(out_bbox)
+        # and from relative [0, 1] to absolute [0, height] coordinates
+        img_h, img_w = target_sizes.unbind(1)
+        scale_fct = torch.stack([img_w, img_h, img_w, img_h], dim=1)
+        boxes = boxes * scale_fct[:, None, :]
+
+        results = [{'scores': s, 'labels': l, 'boxes': b} for s, l, b in zip(scores, labels, boxes)]
+
+        return results
+
+
 def build_detector(args, class_corr):
-    detr, _, postprocessors = build_model(args)
-    if os.path.exists(args.pretrained):
-        if dist.get_rank() == 0:
-            print(f"Load weights for the object detector from {args.pretrained}")
-        detr.load_state_dict(torch.load(args.pretrained, map_location='cpu')['model_state_dict'])
+    #detr, _, postprocessors = build_model(args)
+    with torch.no_grad():
+        detr = DetrForObjectDetection.from_pretrained('facebook/detr-resnet-50')
+    for param in detr.parameters():
+        param.requires_grad = False
+    #if os.path.exists(args.pretrained):
+    #    if dist.get_rank() == 0:
+    #        print(f"Load weights for the object detector from {args.pretrained}")
+    #    detr.load_state_dict(torch.load(args.pretrained, map_location='cpu')['model_state_dict'])
+
     predictor = torch.nn.Linear(args.repr_dim * 2, args.num_classes)
     interaction_head = InteractionHead(
         predictor, args.hidden_dim, args.repr_dim,
-        detr.backbone[0].num_channels,
+        2048,
         args.num_classes, args.human_idx, class_corr
     )
+
     detector = UPT(
-        detr, postprocessors['bbox'], interaction_head,
+        detr, PostProcess(), interaction_head,
         human_idx=args.human_idx, num_classes=args.num_classes,
         alpha=args.alpha, gamma=args.gamma,
         box_score_thresh=args.box_score_thresh,
@@ -285,4 +327,5 @@ def build_detector(args, class_corr):
         min_instances=args.min_instances,
         max_instances=args.max_instances,
     )
+
     return detector

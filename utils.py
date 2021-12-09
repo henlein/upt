@@ -134,6 +134,7 @@ class CustomisedDLE(DistributedLearningEngine):
     def _on_each_iteration(self):
         loss_dict = self._state.net(
             *self._state.inputs, targets=self._state.targets)
+
         if loss_dict['interaction_loss'].isnan():
             raise ValueError(f"The HOI loss is NaN for rank {self._rank}")
 
@@ -154,9 +155,8 @@ class CustomisedDLE(DistributedLearningEngine):
         conversion = torch.from_numpy(np.asarray(
             dataset.object_n_verb_to_interaction, dtype=float
         ))
-
         meter = DetectionAPMeter(
-            600, nproc=1,
+            91 * 3, nproc=1,
             num_gt=dataset.anno_interaction,
             algorithm='11P'
         )
@@ -177,6 +177,7 @@ class CustomisedDLE(DistributedLearningEngine):
             objects = output['objects']
             scores = output['scores']
             verbs = output['labels']
+
             interactions = conversion[objects, verbs]
             # Recover target box scale
             gt_bx_h = net.module.recover_boxes(target['boxes_h'], target['size'])
