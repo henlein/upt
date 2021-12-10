@@ -28,6 +28,38 @@ import sys
 sys.path.append('detr')
 import datasets.transforms as T
 
+
+def get_iou(bb1, bb2):
+    assert bb1['x1'] < bb1['x2']
+    assert bb1['y1'] < bb1['y2']
+    assert bb2['x1'] < bb2['x2']
+    assert bb2['y1'] < bb2['y2']
+
+    # determine the coordinates of the intersection rectangle
+    x_left = max(bb1['x1'], bb2['x1'])
+    y_top = max(bb1['y1'], bb2['y1'])
+    x_right = min(bb1['x2'], bb2['x2'])
+    y_bottom = min(bb1['y2'], bb2['y2'])
+
+    if x_right < x_left or y_bottom < y_top:
+        return 0.0
+
+    # The intersection of two axis-aligned bounding boxes is always an
+    # axis-aligned bounding box
+    intersection_area = (x_right - x_left) * (y_bottom - y_top)
+
+    # compute the area of both AABBs
+    bb1_area = (bb1['x2'] - bb1['x1']) * (bb1['y2'] - bb1['y1'])
+    bb2_area = (bb2['x2'] - bb2['x1']) * (bb2['y2'] - bb2['y1'])
+
+    # compute the intersection over union by taking the intersection
+    # area and dividing it by the sum of prediction + ground-truth
+    # areas - the interesection area
+    iou = intersection_area / float(bb1_area + bb2_area - intersection_area)
+    assert iou >= 0.0
+    assert iou <= 1.0
+    return iou
+
 def custom_collate(batch):
     images = []
     targets = []
@@ -150,16 +182,13 @@ class CustomisedDLE(DistributedLearningEngine):
         net = self._state.net
         net.eval()
 
-        dataset = dataloader.dataset.dataset
-        associate = BoxPairAssociation(min_iou=0.5)
-        conversion = torch.from_numpy(np.asarray(
-            dataset.object_n_verb_to_interaction, dtype=float
-        ))
-        meter = DetectionAPMeter(
-            91 * 3, nproc=1,
-            num_gt=dataset.anno_interaction,
-            algorithm='11P'
-        )
+        all_correct = []
+        verb_correct_obj_wrong = []
+        obj_correct_verb_wrong = []
+        obj_wrong_verb_wrong = []
+        all_wrong = []
+        missed = []
+
         for batch in tqdm(dataloader):
             inputs = pocket.ops.relocate_to_cuda(batch[0])
             output = net(inputs)
@@ -176,31 +205,73 @@ class CustomisedDLE(DistributedLearningEngine):
             boxes_h, boxes_o = boxes[output['pairing']].unbind(0)
             objects = output['objects']
             scores = output['scores']
-            verbs = output['labels']
+            #verbs = output['labels']
 
-            interactions = conversion[objects, verbs]
+            inx = np.array([i for i in range(len(boxes_h)) if i % 3 == 0])
+            boxes_h = boxes_h[inx]
+            boxes_o = boxes_o[inx]
+            objects = objects[inx]
+            scores = scores.reshape(-1, 3)
+
+            pred_hbox = []
+            pred_obox = []
+            pred_obj = []
+            pre_verb = []
+            pred_verb_score = []
+            for hbox, obox, score, obj in zip(boxes_h, boxes_o, scores, objects.reshape(-1,1)):
+                max_score, max_idx = torch.max(score, 0)
+                if max_score.item() > 0.1:
+                    pred_hbox.append(hbox)
+                    pred_obox.append(obox)
+                    pred_obj.append(obj.item())
+                    pre_verb.append(max_idx.item())
+                    pred_verb_score.append(score)
+
             # Recover target box scale
             gt_bx_h = net.module.recover_boxes(target['boxes_h'], target['size'])
             gt_bx_o = net.module.recover_boxes(target['boxes_o'], target['size'])
 
-            # Associate detected pairs with ground truth pairs
-            labels = torch.zeros_like(scores)
-            unique_hoi = interactions.unique()
-            for hoi_idx in unique_hoi:
-                gt_idx = torch.nonzero(target['hoi'] == hoi_idx).squeeze(1)
-                det_idx = torch.nonzero(interactions == hoi_idx).squeeze(1)
-                if len(gt_idx):
-                    labels[det_idx] = associate(
-                        (gt_bx_h[gt_idx].view(-1, 4),
-                        gt_bx_o[gt_idx].view(-1, 4)),
-                        (boxes_h[det_idx].view(-1, 4),
-                        boxes_o[det_idx].view(-1, 4)),
-                        scores[det_idx].view(-1)
-                    )
+            all_correct.append(0)
+            verb_correct_obj_wrong.append(0)
+            obj_correct_verb_wrong.append(0)
+            obj_wrong_verb_wrong.append(0)
+            all_wrong.append(0)
 
-            meter.append(scores, interactions, labels)
 
-        return meter.eval()
+            for hbox, obox, verb, obj in zip(pred_hbox, pred_obox, pre_verb, pred_obj):
+                found = False
+                for ghbox, gobox, gverb, gobj in zip(gt_bx_h, gt_bx_o, target["verb"], target["object"]):
+                    hbox_overlap = get_iou({"x1": hbox[0].item(), "x2": hbox[2].item(), "y1": hbox[1].item(), "y2": hbox[3].item()},
+                                           {"x1": ghbox[0].item(), "x2": ghbox[2].item(), "y1": ghbox[1].item(),
+                                            "y2": ghbox[3].item()})
+                    obox_overlap = get_iou({"x1": obox[0].item(), "x2": obox[2].item(), "y1": obox[1].item(), "y2": obox[3].item()},
+                                           {"x1": gobox[0].item(), "x2": gobox[2].item(), "y1": gobox[1].item(),
+                                            "y2": gobox[3].item()})
+
+                    if hbox_overlap > 0.5 and obox_overlap > 0.5:
+                        found = True
+                        if verb == gverb.item() and obj == gobj.item():
+                            all_correct[-1] += 1
+                        elif verb == gverb:
+                            verb_correct_obj_wrong[-1] += 1
+                        elif obj == gobj:
+                            obj_correct_verb_wrong[-1] += 1
+                        else:
+                            obj_wrong_verb_wrong[-1] += 1
+                        break
+                if not found:
+                    all_wrong[-1] += 1
+
+            missed.append(len(target["verb"]) - sum([all_correct[-1], verb_correct_obj_wrong[-1], obj_correct_verb_wrong[-1], obj_wrong_verb_wrong[-1]]))
+        print("=================================")
+        print(sum(all_correct))
+        print(sum(verb_correct_obj_wrong))
+        print(sum(obj_correct_verb_wrong))
+        print(sum(obj_wrong_verb_wrong))
+        print(sum(all_wrong))
+        print(sum(missed))
+        exit()
+        return None
 
     @torch.no_grad()
     def cache_hico(self, dataloader, cache_dir='matlab'):
