@@ -132,7 +132,7 @@ def main(rank, args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--lr-head', default=1e-4, type=float)
-    parser.add_argument('--batch-size', default=6, type=int)
+    parser.add_argument('--batch-size', default=2, type=int)
     parser.add_argument('--weight-decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=20, type=int)
     parser.add_argument('--lr-drop', default=10, type=int)
