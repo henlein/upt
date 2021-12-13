@@ -9,7 +9,6 @@ Australian Centre for Robotic Vision
 """
 
 import os
-import sys
 import torch
 import random
 import warnings
@@ -99,7 +98,7 @@ def main(rank, args):
     if args.eval:
         if args.dataset == 'vcoco':
             raise NotImplementedError(f"Evaluation on V-COCO has not been implemented.")
-        ap = engine.test_hico(test_loader)
+        ap, my_dict = engine.test_hico(test_loader)
         # Fetch indices for rare and non-rare classes
         num_anno = torch.as_tensor(trainset.dataset.anno_interaction)
         rare = torch.nonzero(num_anno < 10).squeeze(1)
@@ -129,23 +128,11 @@ def main(rank, args):
 
     engine(args.epochs)
 
-@torch.no_grad()
-def sanity_check(args):
-    dataset = DataFactory(name='hicodet', partition=args.partitions[0], data_root=args.data_root)
-    args.human_idx = 0; args.num_classes = 117
-    object_to_target = dataset.dataset.object_to_verb
-    upt = build_detector(args, object_to_target)
-    if args.eval:
-        upt.eval()
-
-    image, target = dataset[0]
-    outputs = upt([image], [target])
 
 if __name__ == '__main__':
-    
     parser = argparse.ArgumentParser()
     parser.add_argument('--lr-head', default=1e-4, type=float)
-    parser.add_argument('--batch-size', default=4, type=int)
+    parser.add_argument('--batch-size', default=6, type=int)
     parser.add_argument('--weight-decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=20, type=int)
     parser.add_argument('--lr-drop', default=10, type=int)
@@ -202,11 +189,6 @@ if __name__ == '__main__':
     parser.add_argument('--max-instances', default=15, type=int)
 
     args = parser.parse_args()
-    print(args)
-
-    #if args.sanity:
-    #    sanity_check(args)
-    #    sys.exit()
 
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = args.port

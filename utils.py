@@ -189,6 +189,18 @@ class CustomisedDLE(DistributedLearningEngine):
         all_wrong = []
         missed = []
 
+        dataset = dataloader.dataset.dataset
+        associate = BoxPairAssociation(min_iou=0.5)
+        conversion = torch.from_numpy(np.asarray(
+            dataset.object_n_verb_to_interaction, dtype=float
+        ))
+
+        meter = DetectionAPMeter(
+            91 * 3, nproc=1,
+            num_gt=dataset.anno_interaction,
+            algorithm='11P'
+        )
+
         for batch in tqdm(dataloader):
             inputs = pocket.ops.relocate_to_cuda(batch[0])
             output = net(inputs)
@@ -205,20 +217,42 @@ class CustomisedDLE(DistributedLearningEngine):
             boxes_h, boxes_o = boxes[output['pairing']].unbind(0)
             objects = output['objects']
             scores = output['scores']
-            #verbs = output['labels']
+            verbs = output['labels']
+            interactions = conversion[objects, verbs]
+
+            gt_bx_h = net.module.recover_boxes(target['boxes_h'], target['size'])
+            gt_bx_o = net.module.recover_boxes(target['boxes_o'], target['size'])
+
+            labels = torch.zeros_like(scores)
+            unique_hoi = interactions.unique()
+
+            for hoi_idx in unique_hoi:
+                gt_idx = torch.nonzero(target['hoi'] == hoi_idx).squeeze(1)
+                det_idx = torch.nonzero(interactions == hoi_idx).squeeze(1)
+                if len(gt_idx):
+                    labels[det_idx] = associate(
+                        (gt_bx_h[gt_idx].view(-1, 4),
+                        gt_bx_o[gt_idx].view(-1, 4)),
+                        (boxes_h[det_idx].view(-1, 4),
+                        boxes_o[det_idx].view(-1, 4)),
+                        scores[det_idx].view(-1)
+                    )
+            meter.append(scores, interactions, labels)
+
+
 
             inx = np.array([i for i in range(len(boxes_h)) if i % 3 == 0])
             boxes_h = boxes_h[inx]
             boxes_o = boxes_o[inx]
             objects = objects[inx]
-            scores = scores.reshape(-1, 3)
+            scores_reshape = scores.reshape(-1, 3)
 
             pred_hbox = []
             pred_obox = []
             pred_obj = []
             pre_verb = []
             pred_verb_score = []
-            for hbox, obox, score, obj in zip(boxes_h, boxes_o, scores, objects.reshape(-1,1)):
+            for hbox, obox, score, obj in zip(boxes_h, boxes_o, scores_reshape, objects.reshape(-1, 1)):
                 max_score, max_idx = torch.max(score, 0)
                 if max_score.item() > 0.1:
                     pred_hbox.append(hbox)
@@ -228,9 +262,6 @@ class CustomisedDLE(DistributedLearningEngine):
                     pred_verb_score.append(score)
 
             # Recover target box scale
-            gt_bx_h = net.module.recover_boxes(target['boxes_h'], target['size'])
-            gt_bx_o = net.module.recover_boxes(target['boxes_o'], target['size'])
-
             all_correct.append(0)
             verb_correct_obj_wrong.append(0)
             obj_correct_verb_wrong.append(0)
@@ -263,15 +294,10 @@ class CustomisedDLE(DistributedLearningEngine):
                     all_wrong[-1] += 1
 
             missed.append(len(target["verb"]) - sum([all_correct[-1], verb_correct_obj_wrong[-1], obj_correct_verb_wrong[-1], obj_wrong_verb_wrong[-1]]))
-        print("=================================")
-        print(sum(all_correct))
-        print(sum(verb_correct_obj_wrong))
-        print(sum(obj_correct_verb_wrong))
-        print(sum(obj_wrong_verb_wrong))
-        print(sum(all_wrong))
-        print(sum(missed))
-        exit()
-        return None
+
+        return meter.eval(), {"all_correct": all_correct, "verb_correct_obj_wrong": verb_correct_obj_wrong, "obj_correct_verb_wrong": obj_correct_verb_wrong,
+                              "obj_wrong_verb_wrong": obj_wrong_verb_wrong, "all_wrong": all_wrong, "missed": missed}
+
 
     @torch.no_grad()
     def cache_hico(self, dataloader, cache_dir='matlab'):

@@ -267,7 +267,6 @@ class UPT(nn.Module):
 
         if self.training:
             interaction_loss = self.compute_interaction_loss(boxes, bh, bo, logits, prior, targets)
-            print(interaction_loss)
             loss_dict = dict(
                 interaction_loss=interaction_loss
             )
