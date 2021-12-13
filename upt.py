@@ -21,9 +21,6 @@ from torchvision.ops.boxes import batched_nms, box_iou
 from ops import binary_focal_loss_with_logits
 from interaction_head import InteractionHead
 
-import sys
-#sys.path.append('detr')
-#from models import build_model
 from util import box_ops
 from util.misc import nested_tensor_from_tensor_list
 from transformers import DetrFeatureExtractor, DetrForObjectDetection
@@ -205,10 +202,7 @@ class UPT(nn.Module):
 
         return detections
 
-    def forward(self,
-        images: List[Tensor],
-        targets: Optional[List[dict]] = None
-    ) -> List[dict]:
+    def forward(self, images: List[Tensor], targets: Optional[List[dict]] = None) -> List[dict]:
         """
         Parameters:
         -----------

@@ -10,4 +10,4 @@ log
 out
 temp*
 checkpoints
-.idea/*
+.idea
