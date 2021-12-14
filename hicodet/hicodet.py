@@ -114,7 +114,7 @@ class HICODet(ImageDataset):
             anno = json.load(f)
 
         self.num_object_cls = 91
-        self.num_action_cls = 3
+        self.num_action_cls = 2
         self.num_interation_cls = self.num_object_cls * self.num_action_cls
         self._anno_file = anno_file
         self.start = 0
@@ -319,11 +319,6 @@ class HICODet(ImageDataset):
         Arguments:
             f(dict): Dictionary loaded from {anno_file}.json
         """
-        idx = list(range(len(f['filenames'])))
-        for empty_idx in f['empty']:
-            idx.remove(empty_idx)
-
-        self._idx = idx
         #self._num_anno = num_anno
 
         self._anno = f['annotation']
@@ -340,11 +335,11 @@ class HICODet(ImageDataset):
                 splitline = line.split()
                 if len(splitline) > 3:
                     if splitline[3] == "T":
-                        self.hoi_annotation[(splitline[1], splitline[2])] = 2
-                    elif splitline[3] == "G":
                         self.hoi_annotation[(splitline[1], splitline[2])] = 1
-                else:
-                    self.hoi_annotation[(splitline[1], splitline[2])] = 0
+                    elif splitline[3] == "G":
+                        self.hoi_annotation[(splitline[1], splitline[2])] = 0
+                #else:
+                #    self.hoi_annotation[(splitline[1], splitline[2])] = 0
 
 
         self.label2id = {
@@ -539,8 +534,7 @@ class HICODet(ImageDataset):
 
 
         num_anno = [0 for _ in range(self.num_interation_cls)]
-
-        for anno in self._anno:
+        for anno_idx, anno in enumerate(self._anno):
             merged_boxes_h = []
             merged_boxes_o = []
             merged_obj = []
@@ -553,6 +547,8 @@ class HICODet(ImageDataset):
                 newobjid = self.label2id[objstr.replace("_", " ")]
 
                 verbstr = self._verbs[verbidx]
+                if (objstr.replace(" ", "_"), verbstr) not in self.hoi_annotation:
+                    continue
                 newverbid = self.hoi_annotation[(objstr.replace(" ", "_"), verbstr)]
 
                 for merged_idx, (merged_hbox, merged_obox, merged_o, merged_v) in enumerate(
@@ -567,9 +563,9 @@ class HICODet(ImageDataset):
                     if hbox_overlap > 0.5 and obox_overlap > 0.5 and newobjid == merged_o:
                         if merged_v < newverbid:
                             merged_verb[merged_idx] = newverbid
-                            merged_hoi_list[merged_idx] = newobjid * 3 + newverbid
-                            num_anno[newobjid * 3 + merged_v] -= 1
-                            num_anno[newobjid * 3 + newverbid] += 1
+                            merged_hoi_list[merged_idx] = newobjid * 2 + newverbid
+                            num_anno[newobjid * 2 + merged_v] -= 1
+                            num_anno[newobjid * 2 + newverbid] += 1
                         found = True
                         break
                 if not found:
@@ -577,15 +573,22 @@ class HICODet(ImageDataset):
                     merged_boxes_o.append(obox)
                     merged_obj.append(newobjid)
                     merged_verb.append(newverbid)
-                    merged_hoi_list.append(newobjid * 3 + newverbid)
-                    num_anno[newobjid * 3 + newverbid] += 1
+                    merged_hoi_list.append(newobjid * 2 + newverbid)
+                    num_anno[newobjid * 2 + newverbid] += 1
 
             anno["boxes_h"] = merged_boxes_h
             anno["boxes_o"] = merged_boxes_o
             anno["object"] = merged_obj
             anno["verb"] = merged_verb
             anno["hoi"] = merged_hoi_list
+            if len(merged_verb) == 0:
+                f['empty'].append(anno_idx)
 
+        idx = list(range(len(f['filenames'])))
+        for empty_idx in list(set(f['empty'])):
+            idx.remove(empty_idx)
+
+        self._idx = idx
         self._num_anno = num_anno
 
 

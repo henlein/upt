@@ -111,8 +111,9 @@ class UPT(nn.Module):
         ])
         prior = torch.cat(prior, dim=1).prod(0)
         x, y = torch.nonzero(prior).unbind(1)
-        logits = logits[x, y]; prior = prior[x, y]; labels = labels[x, y]
-
+        logits = logits[x, y]
+        prior = prior[x, y]
+        labels = labels[x, y]
         n_p = len(torch.nonzero(labels))
         if dist.is_initialized():
             world_size = dist.get_world_size()
@@ -121,10 +122,6 @@ class UPT(nn.Module):
             dist.all_reduce(n_p)
             n_p = (n_p / world_size).item()
 
-        #print("-----------------")
-        #print("prior", prior)
-        #print("logits", logits)
-        #print("labels", labels)
         loss = binary_focal_loss_with_logits(
             torch.log(
                 prior / (1 + torch.exp(-logits) - prior) + 1e-8
@@ -251,12 +248,15 @@ class UPT(nn.Module):
         outputs_class = self.detector.class_labels_classifier(outputs)
         outputs_coord = self.detector.bbox_predictor(outputs).sigmoid()
         results = {'pred_logits': outputs_class, 'pred_boxes': outputs_coord}
+
         results = self.postprocessor(results, image_sizes)
+
         region_props = self.prepare_region_proposals(results, outputs)
 
         logits, prior, bh, bo, objects, attn_maps = self.interaction_head(
             src, image_sizes, region_props
         )
+
         boxes = [r['boxes'] for r in region_props]
 
         if self.training:

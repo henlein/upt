@@ -295,8 +295,8 @@ class CustomisedDLE(DistributedLearningEngine):
 
             missed.append(len(target["verb"]) - sum([all_correct[-1], verb_correct_obj_wrong[-1], obj_correct_verb_wrong[-1], obj_wrong_verb_wrong[-1]]))
 
-        return meter.eval(), {"all_correct": all_correct, "verb_correct_obj_wrong": verb_correct_obj_wrong, "obj_correct_verb_wrong": obj_correct_verb_wrong,
-                              "obj_wrong_verb_wrong": obj_wrong_verb_wrong, "all_wrong": all_wrong, "missed": missed}
+        return meter.eval(), {"all_correct": sum(all_correct), "verb_correct_obj_wrong": sum(verb_correct_obj_wrong), "obj_correct_verb_wrong": sum(obj_correct_verb_wrong),
+                              "obj_wrong_verb_wrong": sum(obj_wrong_verb_wrong), "all_wrong": sum(all_wrong), "missed": sum(missed)}
 
 
     @torch.no_grad()

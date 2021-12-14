@@ -61,12 +61,12 @@ def main(rank, args):
     print("Loader created")
 
     args.human_idx = 1
-    if args.dataset == 'hicodet':
-        object_to_target = train_loader.dataset.dataset.object_to_verb
-        args.num_classes = 3
-    elif args.dataset == 'vcoco':
-        object_to_target = list(train_loader.dataset.dataset.object_to_action.values())
-        args.num_classes = 24
+    #if args.dataset == 'hicodet':
+    object_to_target = train_loader.dataset.dataset.object_to_verb
+    args.num_classes = 2
+    #elif args.dataset == 'vcoco':
+    #    object_to_target = list(train_loader.dataset.dataset.object_to_action.values())
+    #    args.num_classes = 24
     upt = build_detector(args, object_to_target)
 
 
@@ -108,6 +108,8 @@ def main(rank, args):
             f" rare: {ap[rare].mean():.4f},"
             f" none-rare: {ap[non_rare].mean():.4f}"
         )
+        print("========")
+        print(my_dict)
         return
 
     for p in upt.detector.parameters():
@@ -132,7 +134,7 @@ def main(rank, args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--lr-head', default=1e-4, type=float)
-    parser.add_argument('--batch-size', default=6, type=int)
+    parser.add_argument('--batch-size', default=2, type=int)
     parser.add_argument('--weight-decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=20, type=int)
     parser.add_argument('--lr-drop', default=10, type=int)
@@ -183,7 +185,7 @@ if __name__ == '__main__':
     parser.add_argument('--eval', action='store_true')
     parser.add_argument('--cache', action='store_true')
     parser.add_argument('--sanity', action='store_true')
-    parser.add_argument('--box-score-thresh', default=0.9, type=float)
+    parser.add_argument('--box-score-thresh', default=0.2, type=float)
     parser.add_argument('--fg-iou-thresh', default=0.5, type=float)
     parser.add_argument('--min-instances', default=3, type=int)
     parser.add_argument('--max-instances', default=15, type=int)

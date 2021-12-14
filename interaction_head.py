@@ -245,22 +245,17 @@ class InteractionHead(nn.Module):
         )
 
     def compute_prior_scores(self,
-        x: Tensor, y: Tensor, scores: Tensor, object_class: Tensor
-    ) -> Tensor:
+        x: Tensor, y: Tensor, scores: Tensor, object_class: Tensor) -> Tensor:
         prior_h = torch.zeros(len(x), self.num_classes, device=scores.device)
         prior_o = torch.zeros_like(prior_h)
-
         # Raise the power of object detection scores during inference
         p = 1.0 if self.training else 2.8
         s_h = scores[x].pow(p)
         s_o = scores[y].pow(p)
 
-        #print(object_class[y])
-        #print(self.object_class_to_target_class)
         # Map object class index to target class index
         # Object class index to target class index is a one-to-many mapping
-        target_cls_idx = [self.object_class_to_target_class[obj.item()]
-            for obj in object_class[y]]
+        target_cls_idx = [self.object_class_to_target_class[obj.item()] for obj in object_class[y]]
         # Duplicate box pair indices for each target class
         pair_idx = [i for i, tar in enumerate(target_cls_idx) for _ in tar]
         # Flatten mapped target indices
@@ -269,7 +264,9 @@ class InteractionHead(nn.Module):
         prior_h[pair_idx, flat_target_idx] = s_h[pair_idx]
         prior_o[pair_idx, flat_target_idx] = s_o[pair_idx]
 
-        return torch.stack([prior_h, prior_o])
+        ret_stack = torch.stack([prior_h, prior_o])
+
+        return ret_stack
 
     def forward(self, features: OrderedDict, image_shapes: Tensor, region_props: List[dict]):
         """
@@ -294,8 +291,10 @@ class InteractionHead(nn.Module):
         device = features.device
         global_features = self.avg_pool(features).flatten(start_dim=1)
 
-        boxes_h_collated = []; boxes_o_collated = []
-        prior_collated = []; object_class_collated = []
+        boxes_h_collated = []
+        boxes_o_collated = []
+        prior_collated = []
+        object_class_collated = []
         pairwise_tokens_collated = []
         attn_maps_collated = []
 
@@ -306,14 +305,17 @@ class InteractionHead(nn.Module):
             unary_tokens = props['hidden_states']
 
             is_human = labels == self.human_idx
-            n_h = torch.sum(is_human); n = len(boxes)
+            n_h = torch.sum(is_human)
+            n = len(boxes)
             # Permute human instances to the top
-            if not torch.all(labels[:n_h]==self.human_idx):
+            if not torch.all(labels[:n_h] == self.human_idx):
                 h_idx = torch.nonzero(is_human).squeeze(1)
                 o_idx = torch.nonzero(is_human == 0).squeeze(1)
                 perm = torch.cat([h_idx, o_idx])
-                boxes = boxes[perm]; scores = scores[perm]
-                labels = labels[perm]; unary_tokens = unary_tokens[perm]
+                boxes = boxes[perm]
+                scores = scores[perm]
+                labels = labels[perm]
+                unary_tokens = unary_tokens[perm]
             # Skip image when there are no valid human-object pairs
             if n_h == 0 or n <= 1:
                 pairwise_tokens_collated.append(torch.zeros(
@@ -336,7 +338,8 @@ class InteractionHead(nn.Module):
             if len(x_keep) == 0:
                 # Should never happen, just to be safe
                 raise ValueError("There are no valid human-object pairs")
-            x = x.flatten(); y = y.flatten()
+            x = x.flatten()
+            y = y.flatten()
 
             # Compute spatial features
             box_pair_spatial = compute_spatial_encodings(
@@ -364,6 +367,7 @@ class InteractionHead(nn.Module):
             boxes_h_collated.append(x_keep)
             boxes_o_collated.append(y_keep)
             object_class_collated.append(labels[y_keep])
+
             # The prior score is the product of the object detection scores
             prior_collated.append(self.compute_prior_scores(
                 x_keep, y_keep, scores, labels)
