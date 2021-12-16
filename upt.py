@@ -23,7 +23,7 @@ from interaction_head import InteractionHead
 
 from util import box_ops
 from util.misc import nested_tensor_from_tensor_list
-from transformers import DetrFeatureExtractor, DetrForObjectDetection
+from transformers import DetrFeatureExtractor, DetrForObjectDetection, DetrConfig
 
 
 class UPT(nn.Module):
@@ -80,6 +80,25 @@ class UPT(nn.Module):
 
         self.min_instances = min_instances
         self.max_instances = max_instances
+
+        self.freeze_bn = True
+        self.freeze_bn_affine = True
+
+    def train(self, mode=True):
+        """
+        https://discuss.pytorch.org/t/how-to-train-with-frozen-batchnorm/12106/9
+        """
+        super(UPT, self).train(mode)
+        if self.freeze_bn:
+            for m in self.detector.model.backbone.modules():
+                if isinstance(m, nn.BatchNorm2d):
+                    m.eval()
+                    if self.freeze_bn_affine:
+                        m.weight.requires_grad = False
+                        m.bias.requires_grad = False
+                    m.track_running_stats = False
+
+
 
     def recover_boxes(self, boxes, size):
         boxes = box_ops.box_cxcywh_to_xyxy(boxes)
@@ -194,7 +213,7 @@ class UPT(nn.Module):
             detections.append(dict(
                 boxes=bx, pairing=torch.stack([h[x], o[x]]),
                 scores=scores * pr[x, y], labels=y,
-                objects=obj[x], attn_maps=attn, size=size
+                objects=obj[x], attn_maps=attn, size=size, prior=pr
             ))
 
         return detections
@@ -235,15 +254,14 @@ class UPT(nn.Module):
 
         if isinstance(images, (list, torch.Tensor)):
             images = nested_tensor_from_tensor_list(images)
+
         features, pos = self.detector.model.backbone(images.tensors, pixel_mask=images.mask)
 
         src, mask = features[-1]
         assert mask is not None, "Backbone does not return downsampled pixel mask"
 
-        outputs = self.detector.model(images.tensors, pixel_mask=images.mask)[0]
 
-        #projected_feature_map = self.detector.model.input_projection(src)
-        #hs = self.detector.transformer(projected_feature_map, mask, self.detector.query_embed.weight, pos[-1])[0]
+        outputs = self.detector.model(images.tensors, pixel_mask=images.mask)[0]
 
         outputs_class = self.detector.class_labels_classifier(outputs)
         outputs_coord = self.detector.bbox_predictor(outputs).sigmoid()
@@ -296,13 +314,12 @@ class PostProcess(nn.Module):
 def build_detector(args, class_corr):
     #detr, _, postprocessors = build_model(args)
     with torch.no_grad():
+        #config = DetrConfig.from_pretrained('facebook/detr-resnet-50')
+        #detr = DetrForObjectDetection(config)
         detr = DetrForObjectDetection.from_pretrained('facebook/detr-resnet-50')
     for param in detr.parameters():
         param.requires_grad = False
-    #if os.path.exists(args.pretrained):
-    #    if dist.get_rank() == 0:
-    #        print(f"Load weights for the object detector from {args.pretrained}")
-    #    detr.load_state_dict(torch.load(args.pretrained, map_location='cpu')['model_state_dict'])
+    detr.track_running_stats = False
 
     predictor = torch.nn.Linear(args.repr_dim * 2, args.num_classes)
     interaction_head = InteractionHead(

@@ -61,14 +61,10 @@ def main(rank, args):
     print("Loader created")
 
     args.human_idx = 1
-    #if args.dataset == 'hicodet':
     object_to_target = train_loader.dataset.dataset.object_to_verb
     args.num_classes = 2
-    #elif args.dataset == 'vcoco':
-    #    object_to_target = list(train_loader.dataset.dataset.object_to_action.values())
-    #    args.num_classes = 24
-    upt = build_detector(args, object_to_target)
 
+    upt = build_detector(args, object_to_target)
 
     if os.path.exists(args.resume):
         print(f"=> Rank {rank}: continue from saved checkpoint {args.resume}")
@@ -76,7 +72,6 @@ def main(rank, args):
         upt.load_state_dict(checkpoint['model_state_dict'])
     else:
         print(f"=> Rank {rank}: start from a randomly initialised model")
-
 
     print("CustomisedDLE")
     engine = CustomisedDLE(
@@ -87,6 +82,7 @@ def main(rank, args):
         find_unused_parameters=True,
         cache_dir=args.output_dir
     )
+
 
     if args.cache:
         if args.dataset == 'hicodet':
@@ -103,10 +99,13 @@ def main(rank, args):
         num_anno = torch.as_tensor(trainset.dataset.anno_interaction)
         rare = torch.nonzero(num_anno < 10).squeeze(1)
         non_rare = torch.nonzero(num_anno >= 10).squeeze(1)
+        ap = ap.detach().cpu().numpy()
+        ap[ap == 0] = np.nan
+        #print(ap)
         print(
-            f"The mAP is {ap.mean():.4f},"
-            f" rare: {ap[rare].mean():.4f},"
-            f" none-rare: {ap[non_rare].mean():.4f}"
+            f"The mAP is {np.nanmean(ap):.4f},"
+            f" rare: {np.nanmean(ap[rare]):.4f},"
+            f" none-rare: {np.nanmean(ap[non_rare]):.4f}"
         )
         print("========")
         print(my_dict)
@@ -116,8 +115,7 @@ def main(rank, args):
         p.requires_grad = False
 
     param_dicts = [{
-        "params": [p for n, p in upt.named_parameters()
-        if "interaction_head" in n and p.requires_grad]
+        "params": [p for n, p in upt.named_parameters() if "interaction_head" in n and p.requires_grad]
     }]
 
     optim = torch.optim.AdamW(
@@ -127,7 +125,7 @@ def main(rank, args):
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optim, args.lr_drop)
     # Override optimiser and learning rate scheduler
     engine.update_state_key(optimizer=optim, lr_scheduler=lr_scheduler)
-
+    engine.save_checkpoint()
     engine(args.epochs)
 
 

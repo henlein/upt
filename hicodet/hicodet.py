@@ -140,9 +140,13 @@ class HICODet(ImageDataset):
                     "object": list[N]
         """
         intra_idx = self._idx[i]
+        anno = self._anno[intra_idx]
+        fileid = [x for x in self._filenames[intra_idx] if x.isdigit()]
+        fileid_int = int(''.join(fileid[4:]))
+        anno["fileid"] = fileid_int
         return self._transforms(
             self.load_image(os.path.join(self._root, self._filenames[intra_idx])),
-            self._anno[intra_idx]
+            anno,
         )
 
     def __repr__(self) -> str:
@@ -330,7 +334,7 @@ class HICODet(ImageDataset):
         self._verbs = f['verbs']
 
         self.hoi_annotation = {}  # {obj#verb: T/G/-} (string)
-        with open("../HicoDetDataset/HOI.txt") as file:
+        with open(os.path.join(os.path.dirname(self._anno_file), "HOI.txt")) as file:
             for line in file:
                 splitline = line.split()
                 if len(splitline) > 3:
@@ -595,13 +599,14 @@ class HICODet(ImageDataset):
 if __name__ == "__main__":
     os.chdir("..")
     dataset = HICODet(
-        root=os.path.join("../HicoDetDataset", 'hico_20160224_det/images', "train2015"),
-        anno_file=os.path.join("../HicoDetDataset", 'instances_{}.json'.format("train2015")),
+        root=os.path.join("../HicoDetDataset", 'hico_20160224_det/images', "test2015"),
+        anno_file=os.path.join("../HicoDetDataset", 'instances_{}.json'.format("test2015")),
         target_transform=pocket.ops.ToTensor(input_format='dict')
     )
-    data = dataset[0]
+    #print(dataset.filename(4))
+    data = dataset[4]
     print(data)
-    print(dataset.anno_interaction)
+    #print(dataset.anno_interaction)
     #print(dataset.interactions)
     #print(dataset[0])
     #print("--------------")

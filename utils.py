@@ -17,7 +17,6 @@ from tqdm import tqdm
 from collections import defaultdict
 from torch.utils.data import Dataset
 
-from vcoco.vcoco import VCOCO
 from hicodet.hicodet import HICODet
 
 import pocket
@@ -82,19 +81,8 @@ class DataFactory(Dataset):
                 target_transform=pocket.ops.ToTensor(input_format='dict')
             )
         else:
-            assert partition in ['train', 'val', 'trainval', 'test'], \
-                "Unknown V-COCO partition " + partition
-            image_dir = dict(
-                train='mscoco2014/train2014',
-                val='mscoco2014/train2014',
-                trainval='mscoco2014/train2014',
-                test='mscoco2014/val2014'
-            )
-            self.dataset = VCOCO(
-                root=os.path.join(data_root, image_dir[partition]),
-                anno_file=os.path.join(data_root, 'instances_vcoco_{}.json'.format(partition)
-                ), target_transform=pocket.ops.ToTensor(input_format='dict')
-            )
+            print("ERROR!!!")
+            exit(0)
 
         # Prepare dataset transforms
         normalize = T.Compose([
@@ -195,14 +183,21 @@ class CustomisedDLE(DistributedLearningEngine):
             dataset.object_n_verb_to_interaction, dtype=float
         ))
 
+        #test_anno = [0 for _ in range(len(dataset.anno_interaction))]
+        #test_anno[30] = 2
         meter = DetectionAPMeter(
-            91 * 3, nproc=1,
+            91 * 2, nproc=1,
+            #num_gt=test_anno,
             num_gt=dataset.anno_interaction,
             algorithm='11P'
         )
 
-        for batch in tqdm(dataloader):
+        for batch_idx, batch in tqdm(enumerate(dataloader)):
+            if batch_idx < 4:
+                continue
+
             inputs = pocket.ops.relocate_to_cuda(batch[0])
+            #print("----")
             output = net(inputs)
 
             # Skip images without detections
@@ -211,6 +206,7 @@ class CustomisedDLE(DistributedLearningEngine):
             # Batch size is fixed as 1 for inference
             assert len(output) == 1, f"Batch size is not 1 but {len(output)}."
             output = pocket.ops.relocate_to_cpu(output[0], ignore=True)
+            output.pop("attn_maps")
             target = batch[-1][0]
             # Format detections
             boxes = output['boxes']
@@ -219,10 +215,10 @@ class CustomisedDLE(DistributedLearningEngine):
             scores = output['scores']
             verbs = output['labels']
             interactions = conversion[objects, verbs]
-
             gt_bx_h = net.module.recover_boxes(target['boxes_h'], target['size'])
+            print(gt_bx_h)
             gt_bx_o = net.module.recover_boxes(target['boxes_o'], target['size'])
-
+            print(gt_bx_o)
             labels = torch.zeros_like(scores)
             unique_hoi = interactions.unique()
 
@@ -237,22 +233,26 @@ class CustomisedDLE(DistributedLearningEngine):
                         boxes_o[det_idx].view(-1, 4)),
                         scores[det_idx].view(-1)
                     )
+            print(".....")
+            print(scores)
+            print(interactions)
+            print(labels)
             meter.append(scores, interactions, labels)
 
 
 
-            inx = np.array([i for i in range(len(boxes_h)) if i % 3 == 0])
-            boxes_h = boxes_h[inx]
-            boxes_o = boxes_o[inx]
-            objects = objects[inx]
-            scores_reshape = scores.reshape(-1, 3)
+            inx = np.array([i for i in range(len(boxes_h)) if i % 2 == 0])
+            boxes_h_filter = boxes_h[inx]
+            boxes_o_filter = boxes_o[inx]
+            objects_filter = objects[inx]
+            scores_reshape = scores.reshape(-1, 2)
 
             pred_hbox = []
             pred_obox = []
             pred_obj = []
             pre_verb = []
             pred_verb_score = []
-            for hbox, obox, score, obj in zip(boxes_h, boxes_o, scores_reshape, objects.reshape(-1, 1)):
+            for hbox, obox, score, obj in zip(boxes_h_filter, boxes_o_filter, scores_reshape, objects_filter.reshape(-1, 1)):
                 max_score, max_idx = torch.max(score, 0)
                 if max_score.item() > 0.1:
                     pred_hbox.append(hbox)
@@ -261,15 +261,21 @@ class CustomisedDLE(DistributedLearningEngine):
                     pre_verb.append(max_idx.item())
                     pred_verb_score.append(score)
 
+            if len(pre_verb) == 0:
+                max_score, max_idx = torch.max(scores, 0)
+                pred_hbox.append(boxes_h[max_idx])
+                pred_obox.append(boxes_o[max_idx])
+                pred_obj.append(objects[max_idx].item())
+                pre_verb.append(max_idx.item() % 2)
+                pred_verb_score.append(scores[max_idx])
             # Recover target box scale
             all_correct.append(0)
             verb_correct_obj_wrong.append(0)
             obj_correct_verb_wrong.append(0)
             obj_wrong_verb_wrong.append(0)
             all_wrong.append(0)
-
-
             for hbox, obox, verb, obj in zip(pred_hbox, pred_obox, pre_verb, pred_obj):
+                print(str(hbox) + " - " + str(obox) + " :" + str(obj) + " - " + str(verb))
                 found = False
                 for ghbox, gobox, gverb, gobj in zip(gt_bx_h, gt_bx_o, target["verb"], target["object"]):
                     hbox_overlap = get_iou({"x1": hbox[0].item(), "x2": hbox[2].item(), "y1": hbox[1].item(), "y2": hbox[3].item()},
@@ -294,7 +300,7 @@ class CustomisedDLE(DistributedLearningEngine):
                     all_wrong[-1] += 1
 
             missed.append(len(target["verb"]) - sum([all_correct[-1], verb_correct_obj_wrong[-1], obj_correct_verb_wrong[-1], obj_wrong_verb_wrong[-1]]))
-
+            break
         return meter.eval(), {"all_correct": sum(all_correct), "verb_correct_obj_wrong": sum(verb_correct_obj_wrong), "obj_correct_verb_wrong": sum(obj_correct_verb_wrong),
                               "obj_wrong_verb_wrong": sum(obj_wrong_verb_wrong), "all_wrong": sum(all_wrong), "missed": sum(missed)}
 
