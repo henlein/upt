@@ -129,11 +129,35 @@ class UPT(nn.Module):
             for bx, h, o, target in zip(boxes, bh, bo, targets)
         ])
         prior = torch.cat(prior, dim=1).prod(0)
+        logits = F.softmax(logits, -1)
+
+        for lab in labels:
+            if torch.count_nonzero(lab) == 0:
+                lab[0] = 1
+
+        #max_logits, max_logits_idx = torch.max(logits, dim=1)
+        #_, max_lable_idx = torch.max(labels, dim=1)
+
+        #equal = torch.eq(max_logits_idx, max_lable_idx)
+
+        #one = torch.ones_like(equal)
+        #labels_zeros_ones = torch.zeros_like(labels)
+        #labels_zeros_ones[:, 0] = 1.
+        #print(labels_zeros_ones)
+        #print(torch.count_nonzero(labels, dim=1) > 0)
+        #labels = torch.where(torch.count_nonzero(labels, dim=1) > 0, labels, labels_zeros_ones)
+        #print(labels)
         x, y = torch.nonzero(prior).unbind(1)
+        #print(x)
+        #print(y)
         logits = logits[x, y]
+        #print(logits)
         prior = prior[x, y]
         labels = labels[x, y]
+        #print(prior.size())
+        #print(labels.size())
         n_p = len(torch.nonzero(labels))
+        #print(n_p)
         if dist.is_initialized():
             world_size = dist.get_world_size()
             n_p = torch.as_tensor([n_p], device='cuda')
@@ -282,6 +306,7 @@ class UPT(nn.Module):
             loss_dict = dict(
                 interaction_loss=interaction_loss
             )
+            #exit()
             return loss_dict
 
         detections = self.postprocessing(boxes, bh, bo, logits, prior, objects, attn_maps, image_sizes)

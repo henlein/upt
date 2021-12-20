@@ -62,7 +62,7 @@ def main(rank, args):
 
     args.human_idx = 1
     object_to_target = train_loader.dataset.dataset.object_to_verb
-    args.num_classes = 2
+    args.num_classes = 3
 
     upt = build_detector(args, object_to_target)
 
@@ -169,7 +169,7 @@ if __name__ == '__main__':
     parser.add_argument('--num-workers', default=2, type=int)
     #parser.add_argument('--data-root', default='./hicodet')
     parser.add_argument('--data-root', default='../HicoDetDataset')
-
+    #parser.add_argument('--data-root', default='D:/Corpora/HICO-DET')
     # training parameters
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')

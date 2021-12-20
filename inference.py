@@ -44,7 +44,8 @@ def visualise_entire_image(image, output, actions, action=None, thresh=0.2):
     ]).unsqueeze(0)
     boxes = output['boxes'] * scale_fct
     # Find the number of human and object instances
-    nh = len(output['pairing'][0].unique()); no = len(boxes)
+    nh = len(output['pairing'][0].unique())
+    no = len(boxes)
 
     scores = output['scores']
     pred = output['labels']

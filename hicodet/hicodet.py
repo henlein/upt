@@ -114,7 +114,7 @@ class HICODet(ImageDataset):
             anno = json.load(f)
 
         self.num_object_cls = 91
-        self.num_action_cls = 2
+        self.num_action_cls = 3
         self.num_interation_cls = self.num_object_cls * self.num_action_cls
         self._anno_file = anno_file
         self.start = 0
@@ -339,9 +339,9 @@ class HICODet(ImageDataset):
                 splitline = line.split()
                 if len(splitline) > 3:
                     if splitline[3] == "T":
-                        self.hoi_annotation[(splitline[1], splitline[2])] = 1
+                        self.hoi_annotation[(splitline[1], splitline[2])] = 2
                     elif splitline[3] == "G":
-                        self.hoi_annotation[(splitline[1], splitline[2])] = 0
+                        self.hoi_annotation[(splitline[1], splitline[2])] = 1
                 #else:
                 #    self.hoi_annotation[(splitline[1], splitline[2])] = 0
 
@@ -568,8 +568,8 @@ class HICODet(ImageDataset):
                         if merged_v < newverbid:
                             merged_verb[merged_idx] = newverbid
                             merged_hoi_list[merged_idx] = newobjid * 2 + newverbid
-                            num_anno[newobjid * 2 + merged_v] -= 1
-                            num_anno[newobjid * 2 + newverbid] += 1
+                            num_anno[newobjid * 3 + merged_v] -= 1
+                            num_anno[newobjid * 3 + newverbid] += 1
                         found = True
                         break
                 if not found:
@@ -577,14 +577,15 @@ class HICODet(ImageDataset):
                     merged_boxes_o.append(obox)
                     merged_obj.append(newobjid)
                     merged_verb.append(newverbid)
-                    merged_hoi_list.append(newobjid * 2 + newverbid)
-                    num_anno[newobjid * 2 + newverbid] += 1
+                    merged_hoi_list.append(newobjid * 3 + newverbid)
+                    num_anno[newobjid * 3 + newverbid] += 1
 
             anno["boxes_h"] = merged_boxes_h
             anno["boxes_o"] = merged_boxes_o
             anno["object"] = merged_obj
             anno["verb"] = merged_verb
             anno["hoi"] = merged_hoi_list
+            #print(anno)
             if len(merged_verb) == 0:
                 f['empty'].append(anno_idx)
 
@@ -599,13 +600,11 @@ class HICODet(ImageDataset):
 if __name__ == "__main__":
     os.chdir("..")
     dataset = HICODet(
-        root=os.path.join("../HicoDetDataset", 'hico_20160224_det/images', "test2015"),
-        anno_file=os.path.join("../HicoDetDataset", 'instances_{}.json'.format("test2015")),
+        root=os.path.join("D:/Corpora/HICO-DET", 'hico_20160224_det/images', "test2015"),
+        anno_file=os.path.join("D:/Corpora/HICO-DET", 'instances_{}.json'.format("test2015")),
         target_transform=pocket.ops.ToTensor(input_format='dict')
     )
     #print(dataset.filename(4))
-    data = dataset[4]
-    print(data)
     #print(dataset.anno_interaction)
     #print(dataset.interactions)
     #print(dataset[0])
