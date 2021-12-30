@@ -84,13 +84,6 @@ def main(rank, args):
     )
 
 
-    if args.cache:
-        if args.dataset == 'hicodet':
-            engine.cache_hico(test_loader, args.output_dir)
-        elif args.dataset == 'vcoco':
-            engine.cache_vcoco(test_loader, args.output_dir)
-        return
-
     if args.eval:
         if args.dataset == 'vcoco':
             raise NotImplementedError(f"Evaluation on V-COCO has not been implemented.")

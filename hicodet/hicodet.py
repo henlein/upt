@@ -599,12 +599,12 @@ class HICODet(ImageDataset):
 if __name__ == "__main__":
     os.chdir("..")
     dataset = HICODet(
-        root=os.path.join("../HicoDetDataset", 'hico_20160224_det/images', "test2015"),
-        anno_file=os.path.join("../HicoDetDataset", 'instances_{}.json'.format("test2015")),
+        root=os.path.join("../HicoDetDataset", 'hico_20160224_det/images', "train2015"),
+        anno_file=os.path.join("../HicoDetDataset", 'instances_{}.json'.format("train2015")),
         target_transform=pocket.ops.ToTensor(input_format='dict')
     )
     #print(dataset.filename(4))
-    data = dataset[4]
+    data = dataset[1179]
     print(data)
     #print(dataset.anno_interaction)
     #print(dataset.interactions)

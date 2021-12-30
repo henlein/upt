@@ -1,0 +1,3 @@
+(pocket) henlein@warogast:~/upt-ori$ python main.py --eval --resume ../upt/checkpoints/upt-r50-hicodet-classes-2/ckpt_41940_20.pt
+The mAP is 0.2287, rare: 0.1823, none-rare: 0.2328
+{'all_correct': 6042, 'verb_correct_obj_wrong': 600, 'obj_correct_verb_wrong': 1600, 'obj_wrong_verb_wrong': 186, 'all_wrong': 7132, 'missed': 9323}

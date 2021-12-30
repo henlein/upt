@@ -6,7 +6,7 @@ Fred Zhang <frederic.zhang@anu.edu.au>
 The Australian National University
 Australian Centre for Robotic Vision
 """
-
+import json
 import os
 import torch
 import pickle
@@ -90,7 +90,7 @@ class DataFactory(Dataset):
             T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
         scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
-        if partition.startswith('train'):
+        if partition.startswith('train'): 
             self.transforms = T.Compose([
                 T.RandomHorizontalFlip(),
                 T.ColorJitter(.4, .4, .4),
@@ -192,12 +192,26 @@ class CustomisedDLE(DistributedLearningEngine):
             algorithm='11P'
         )
 
-        for batch_idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
-            #if batch_idx > 10:
-            #    break
+        f = open("results_test.json", "w")
 
+        filterdict = set()
+        anno = open("../HicoDetDataset/via234_780 items_Dec 23.json", "r")
+        anno_data = json.load(anno)
+        for img_key in anno_data["_via_img_metadata"].keys():
+            #print(img_key)
+            split_key = img_key.split("_")[2]
+            split_key = split_key.split(".")[0]
+            filterdict.add(int(split_key))
+        #print(filterdict)
+        for batch_idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
+            if batch_idx < 880:
+                continue
+            target = batch[-1][0]
+            if target["fileid"].item() not in filterdict:
+                continue
+            #print(target["fileid"].item())
             inputs = pocket.ops.relocate_to_cuda(batch[0])
-            #print("----")
+
             output = net(inputs)
 
             # Skip images without detections
@@ -207,7 +221,12 @@ class CustomisedDLE(DistributedLearningEngine):
             assert len(output) == 1, f"Batch size is not 1 but {len(output)}."
             output = pocket.ops.relocate_to_cpu(output[0], ignore=True)
             output.pop("attn_maps")
-            target = batch[-1][0]
+
+
+            listinputs = [x.tolist() for x in inputs]
+            dicttarget = {x: y.tolist() for x, y in target.items()}
+            dictoutput = {x: y.tolist() for x, y in output.items()}
+            f.write(json.dumps({"target": dicttarget, "output": dictoutput}))
             # Format detections
             boxes = output['boxes']
             boxes_h, boxes_o = boxes[output['pairing']].unbind(0)
@@ -221,10 +240,17 @@ class CustomisedDLE(DistributedLearningEngine):
             #print(gt_bx_o)
             labels = torch.zeros_like(scores)
             unique_hoi = interactions.unique()
-
+            #print("=======================")
+            #print(target)
+            #print(unique_hoi)
+            #print(gt_bx_h)
+            #print(gt_bx_o)
             for hoi_idx in unique_hoi:
+                #print(".....")
                 gt_idx = torch.nonzero(target['hoi'] == hoi_idx).squeeze(1)
                 det_idx = torch.nonzero(interactions == hoi_idx).squeeze(1)
+                #print(gt_idx)
+                #print(det_idx)
                 if len(gt_idx):
                     labels[det_idx] = associate(
                         (gt_bx_h[gt_idx].view(-1, 4),
@@ -233,10 +259,7 @@ class CustomisedDLE(DistributedLearningEngine):
                         boxes_o[det_idx].view(-1, 4)),
                         scores[det_idx].view(-1)
                     )
-            #print(".....")
-            #print(scores)
-            #print(interactions)
-            #print(labels)
+
             meter.append(scores, interactions, labels)
 
 
@@ -300,7 +323,7 @@ class CustomisedDLE(DistributedLearningEngine):
                     all_wrong[-1] += 1
 
             missed.append(len(target["verb"]) - sum([all_correct[-1], verb_correct_obj_wrong[-1], obj_correct_verb_wrong[-1], obj_wrong_verb_wrong[-1]]))
-            #break
+        f.close()
         return meter.eval(), {"all_correct": sum(all_correct), "verb_correct_obj_wrong": sum(verb_correct_obj_wrong), "obj_correct_verb_wrong": sum(obj_correct_verb_wrong),
                               "obj_wrong_verb_wrong": sum(obj_wrong_verb_wrong), "all_wrong": sum(all_wrong), "missed": sum(missed)}
 
