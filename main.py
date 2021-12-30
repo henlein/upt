@@ -79,7 +79,7 @@ def main(rank, args):
         max_norm=args.clip_max_norm,
         num_classes=args.num_classes,
         print_interval=args.print_interval,
-        find_unused_parameters=True,
+        find_unused_parameters=False,
         cache_dir=args.output_dir
     )
 
@@ -101,7 +101,6 @@ def main(rank, args):
         non_rare = torch.nonzero(num_anno >= 10).squeeze(1)
         ap = ap.detach().cpu().numpy()
         ap[ap == 0] = np.nan
-        #print(ap)
         print(
             f"The mAP is {np.nanmean(ap):.4f},"
             f" rare: {np.nanmean(ap[rare]):.4f},"

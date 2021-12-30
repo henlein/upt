@@ -192,9 +192,9 @@ class CustomisedDLE(DistributedLearningEngine):
             algorithm='11P'
         )
 
-        for batch_idx, batch in tqdm(enumerate(dataloader)):
-            if batch_idx < 4:
-                continue
+        for batch_idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
+            #if batch_idx > 10:
+            #    break
 
             inputs = pocket.ops.relocate_to_cuda(batch[0])
             #print("----")
@@ -216,9 +216,9 @@ class CustomisedDLE(DistributedLearningEngine):
             verbs = output['labels']
             interactions = conversion[objects, verbs]
             gt_bx_h = net.module.recover_boxes(target['boxes_h'], target['size'])
-            print(gt_bx_h)
+            #print(gt_bx_h)
             gt_bx_o = net.module.recover_boxes(target['boxes_o'], target['size'])
-            print(gt_bx_o)
+            #print(gt_bx_o)
             labels = torch.zeros_like(scores)
             unique_hoi = interactions.unique()
 
@@ -233,10 +233,10 @@ class CustomisedDLE(DistributedLearningEngine):
                         boxes_o[det_idx].view(-1, 4)),
                         scores[det_idx].view(-1)
                     )
-            print(".....")
-            print(scores)
-            print(interactions)
-            print(labels)
+            #print(".....")
+            #print(scores)
+            #print(interactions)
+            #print(labels)
             meter.append(scores, interactions, labels)
 
 
@@ -275,7 +275,7 @@ class CustomisedDLE(DistributedLearningEngine):
             obj_wrong_verb_wrong.append(0)
             all_wrong.append(0)
             for hbox, obox, verb, obj in zip(pred_hbox, pred_obox, pre_verb, pred_obj):
-                print(str(hbox) + " - " + str(obox) + " :" + str(obj) + " - " + str(verb))
+                #print(str(hbox) + " - " + str(obox) + " :" + str(obj) + " - " + str(verb))
                 found = False
                 for ghbox, gobox, gverb, gobj in zip(gt_bx_h, gt_bx_o, target["verb"], target["object"]):
                     hbox_overlap = get_iou({"x1": hbox[0].item(), "x2": hbox[2].item(), "y1": hbox[1].item(), "y2": hbox[3].item()},
@@ -300,7 +300,7 @@ class CustomisedDLE(DistributedLearningEngine):
                     all_wrong[-1] += 1
 
             missed.append(len(target["verb"]) - sum([all_correct[-1], verb_correct_obj_wrong[-1], obj_correct_verb_wrong[-1], obj_wrong_verb_wrong[-1]]))
-            break
+            #break
         return meter.eval(), {"all_correct": sum(all_correct), "verb_correct_obj_wrong": sum(verb_correct_obj_wrong), "obj_correct_verb_wrong": sum(obj_correct_verb_wrong),
                               "obj_wrong_verb_wrong": sum(obj_wrong_verb_wrong), "all_wrong": sum(all_wrong), "missed": sum(missed)}
 
