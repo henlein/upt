@@ -34,7 +34,7 @@ class HICODetOriSubset(DataSubset):
 class HICODetOri(ImageDataset):
     def __init__(self, root: str, anno_ori_file: str):
         super(HICODetOri, self).__init__(root)
-
+        self.anno_ori_file = anno_ori_file
         with open(anno_ori_file, 'r') as f:
             anno_ori = json.load(f)
 
@@ -60,7 +60,14 @@ class HICODetOri(ImageDataset):
                     "object": list[N]
         """
         anno = self._anno[i]
-        return self.load_image(os.path.join(self._root, self._anno[i]["filename"])), anno
+
+        fileid = [x for x in anno["filename"] if x.isdigit()]
+        fileid_int = int(''.join(fileid[4:]))
+
+        #self._anno.append({"filename": anno["filename"], "boxes": torch.tensor(bboxes), "front": fronts, "up": ups, "object": torch.tensor(names), "labels": torch.FloatTensor(labels)})
+
+        id_anno = {"fileid": torch.tensor(fileid_int), "boxes": anno["boxes"], "object": anno["object"], "labels": anno["labels"]}
+        return self.load_image(os.path.join(self._root, self._anno[i]["filename"])), id_anno
 
     def __str__(self) -> str:
         """Return the readable string representation"""
@@ -68,6 +75,15 @@ class HICODetOri(ImageDataset):
         reprstr += '\tNumber of images: {}\n'.format(self.__len__())
         reprstr += '\tImage directory: {}\n'.format(self._root)
         reprstr += '\tAnnotation file: {}\n'.format(self._root)
+        return reprstr
+
+    def __repr__(self) -> str:
+        """Return the executable string representation"""
+        reprstr = self.__class__.__name__ + '(root=' + repr(self._root)
+        reprstr += ', anno_file='
+        reprstr += repr(self.anno_ori_file)
+        reprstr += ')'
+        # Ignore the optional arguments
         return reprstr
 
     @property
@@ -246,10 +262,10 @@ class HICODetOri(ImageDataset):
                 fronts.append(front_vec)
                 ups.append(up_vec)
                 names.append(self.label2id[name])
-                labels.append([front_vec, up_vec])
+                labels.append(front_vec + up_vec)
 
             if len(bboxes) > 0:
-                self._anno.append({"filename": anno["filename"], "boxes": torch.as_tensor(bboxes), "front": fronts, "up": ups, "object": torch.tensor(names), "labels": torch.tensor(labels)})
+                self._anno.append({"filename": anno["filename"], "boxes": torch.tensor(bboxes), "front": fronts, "up": ups, "object": torch.tensor(names), "labels": torch.FloatTensor(labels)})
 
 
 class DataFactoryOri(Dataset):

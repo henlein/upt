@@ -1,0 +1,6 @@
+=> Rank 0: continue from saved checkpoint ../upt/checkpoints/res-50-classes-2/ckpt_41940_20.pt
+CustomisedDLE
+100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 8522/8522 [46:52<00:00,  3.03it/s]
+The mAP is 0.2558, rare: 0.1565, none-rare: 0.2646
+========
+{'all_correct': 6433, 'verb_correct_obj_wrong': 517, 'obj_correct_verb_wrong': 1636, 'obj_wrong_verb_wrong': 182, 'all_wrong': 6984, 'missed': 7199}

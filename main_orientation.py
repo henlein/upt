@@ -18,15 +18,22 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.utils.data import DataLoader, DistributedSampler
 from hicodet.hicodet_orientation import HICODetOri, DataFactoryOri
+from pocket.core import DistributedLearningEngine
 from upt import build_detector
-from utils import custom_collate, CustomisedDLE, DataFactory
+from utils import custom_collate
 from orientation_model import OrientationModel
 warnings.filterwarnings("ignore")
 
 def main(rank, args):
-
+    dist.init_process_group(
+        backend="nccl",
+        #backend="gloo",
+        init_method="env://",
+        world_size=args.world_size,
+        rank=rank
+    )
     # Fix seed
-    seed = args.seed
+    seed = args.seed + rank
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
@@ -36,10 +43,10 @@ def main(rank, args):
         root=os.path.join(args.data_root, 'hico_20160224_det/images', "train2015"),
         anno_ori_file=os.path.join(args.data_root, "via234_780 items_Dec 23.json")
     )
-    train_dataset, test_dataset = dataset.split(0.8)
+    #train_dataset, test_dataset = dataset.split(0.8)
 
-    trainset = DataFactoryOri(train_dataset, "train", True)
-    testset = DataFactoryOri(test_dataset, "test", False)
+    trainset = DataFactoryOri(dataset, "train", True)
+    #testset = DataFactoryOri(test_dataset, "test", False)
     print("DataFactory created")
     train_loader = DataLoader(
         dataset=trainset,
@@ -50,18 +57,29 @@ def main(rank, args):
             num_replicas=args.world_size, 
             rank=rank)
     )
-    test_loader = DataLoader(
-        dataset=testset,
-        collate_fn=custom_collate, batch_size=1,
-        num_workers=args.num_workers, pin_memory=True, drop_last=False,
-        sampler=torch.utils.data.SequentialSampler(testset)
-    )
+    #test_loader = DataLoader(
+    #    dataset=testset,
+    #    collate_fn=custom_collate, batch_size=1,
+    #    num_workers=args.num_workers, pin_memory=True, drop_last=False,
+    #    sampler=torch.utils.data.SequentialSampler(testset)
+    #)
     print("Loader created")
 
     args.human_idx = 1
-    args.num_classes = 3
+    args.num_classes = 2
 
     orimodel = OrientationModel(args)
+    #orimodel.cuda()
+
+    print("CustomisedDLE")
+    engine = OrientationDLE(
+        orimodel, train_loader,
+        max_norm=args.clip_max_norm,
+        num_classes=args.num_classes,
+        print_interval=args.print_interval,
+        find_unused_parameters=True,
+        cache_dir=args.output_dir
+    )
 
     params = []
     for n, p in orimodel.named_parameters():
@@ -75,6 +93,13 @@ def main(rank, args):
         weight_decay=args.weight_decay
     )
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optim, args.lr_drop)
+
+    engine.update_state_key(optimizer=optim, lr_scheduler=lr_scheduler)
+    engine.save_checkpoint()
+    engine(args.epochs)
+
+
+    """
     max_norm = args.clip_max_norm
     for _ in range(20):
         for batch in train_loader:
@@ -92,6 +117,27 @@ def main(rank, args):
                 torch.nn.utils.clip_grad_norm_(orimodel.parameters(), max_norm)
             optim.step()
         lr_scheduler.step()
+    """
+
+class OrientationDLE(DistributedLearningEngine):
+    def __init__(self, net, dataloader, max_norm=0, num_classes=117, **kwargs):
+        super().__init__(net, None, dataloader, **kwargs)
+        self.max_norm = max_norm
+        self.num_classes = num_classes
+
+    def _on_each_iteration(self):
+        loss_dict = self._state.net(
+            *self._state.inputs, targets=self._state.targets)
+
+        if loss_dict['interaction_loss'].isnan():
+            raise ValueError(f"The HOI loss is NaN for rank {self._rank}")
+
+        self._state.loss = sum(loss for loss in loss_dict.values())
+        self._state.optimizer.zero_grad(set_to_none=True)
+        self._state.loss.backward()
+        if self.max_norm > 0:
+            torch.nn.utils.clip_grad_norm_(self._state.net.parameters(), self.max_norm)
+        self._state.optimizer.step()
 
 
 if __name__ == '__main__':
@@ -139,7 +185,7 @@ if __name__ == '__main__':
     parser.add_argument('--pretrained', default='', help='Path to a pretrained detector')
     parser.add_argument('--resume', default='', help='Resume from a model')
     parser.add_argument('--output-dir', default='checkpoints')
-    parser.add_argument('--print-interval', default=500, type=int)
+    parser.add_argument('--print-interval', default=100, type=int)
     parser.add_argument('--world-size', default=1, type=int)
     parser.add_argument('--eval', action='store_true')
 
@@ -150,7 +196,8 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    #main(0, args)
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = args.port
 
-    main(0, args)
+    mp.spawn(main, nprocs=args.world_size, args=(args,))

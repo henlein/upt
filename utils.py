@@ -192,8 +192,8 @@ class CustomisedDLE(DistributedLearningEngine):
             algorithm='11P'
         )
 
+        """
         f = open("results_test.json", "w")
-
         filterdict = set()
         anno = open("../HicoDetDataset/via234_780 items_Dec 23.json", "r")
         anno_data = json.load(anno)
@@ -203,12 +203,14 @@ class CustomisedDLE(DistributedLearningEngine):
             split_key = split_key.split(".")[0]
             filterdict.add(int(split_key))
         #print(filterdict)
+        """
+
         for batch_idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
             if batch_idx < 880:
                 continue
             target = batch[-1][0]
-            if target["fileid"].item() not in filterdict:
-                continue
+            #if target["fileid"].item() not in filterdict:
+            #    continue
             #print(target["fileid"].item())
             inputs = pocket.ops.relocate_to_cuda(batch[0])
 
@@ -226,7 +228,7 @@ class CustomisedDLE(DistributedLearningEngine):
             listinputs = [x.tolist() for x in inputs]
             dicttarget = {x: y.tolist() for x, y in target.items()}
             dictoutput = {x: y.tolist() for x, y in output.items()}
-            f.write(json.dumps({"target": dicttarget, "output": dictoutput}))
+            #f.write(json.dumps({"target": dicttarget, "output": dictoutput}))
             # Format detections
             boxes = output['boxes']
             boxes_h, boxes_o = boxes[output['pairing']].unbind(0)
@@ -323,7 +325,7 @@ class CustomisedDLE(DistributedLearningEngine):
                     all_wrong[-1] += 1
 
             missed.append(len(target["verb"]) - sum([all_correct[-1], verb_correct_obj_wrong[-1], obj_correct_verb_wrong[-1], obj_wrong_verb_wrong[-1]]))
-        f.close()
+        #f.close()
         return meter.eval(), {"all_correct": sum(all_correct), "verb_correct_obj_wrong": sum(verb_correct_obj_wrong), "obj_correct_verb_wrong": sum(obj_correct_verb_wrong),
                               "obj_wrong_verb_wrong": sum(obj_wrong_verb_wrong), "all_wrong": sum(all_wrong), "missed": sum(missed)}
 
