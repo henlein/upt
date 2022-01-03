@@ -299,11 +299,13 @@ class InteractionHead(nn.Module):
         attn_maps_collated = []
         unary_tokens_collated = []
         for b_idx, props in enumerate(region_props):
+            #print("####")
             boxes = props['boxes']
             scores = props['scores']
             labels = props['labels']
             unary_tokens = props['hidden_states']
-
+            #print(boxes.shape)
+            #print(unary_tokens.shape)
             is_human = labels == self.human_idx
             n_h = torch.sum(is_human)
             n = len(boxes)
@@ -316,6 +318,7 @@ class InteractionHead(nn.Module):
                 scores = scores[perm]
                 labels = labels[perm]
                 unary_tokens = unary_tokens[perm]
+            #print(unary_tokens.shape)
             # Skip image when there are no valid human-object pairs
             if n_h == 0 or n <= 1:
                 pairwise_tokens_collated.append(torch.zeros(
@@ -326,6 +329,7 @@ class InteractionHead(nn.Module):
                 boxes_o_collated.append(torch.zeros(0, device=device, dtype=torch.int64))
                 object_class_collated.append(torch.zeros(0, device=device, dtype=torch.int64))
                 prior_collated.append(torch.zeros(2, 0, self.num_classes, device=device))
+                unary_tokens_collated.append(torch.zeros(0, device=device, dtype=torch.int64))
                 continue
 
             # Get the pairwise indices
@@ -351,6 +355,7 @@ class InteractionHead(nn.Module):
 
             # Run the cooperative layer
             unary_tokens, unary_attn = self.coop_layer(unary_tokens, box_pair_spatial_reshaped)
+            #print(unary_tokens.shape)
             # Generate pairwise tokens with MBF
             pairwise_tokens = torch.cat([
                 self.mbf(

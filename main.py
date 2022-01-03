@@ -83,7 +83,6 @@ def main(rank, args):
         cache_dir=args.output_dir
     )
 
-
     if args.eval:
         if args.dataset == 'vcoco':
             raise NotImplementedError(f"Evaluation on V-COCO has not been implemented.")

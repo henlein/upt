@@ -210,7 +210,7 @@ class UPT(nn.Module):
             x, y = torch.nonzero(pr).unbind(1)
             scores = torch.sigmoid(lg[x, y])
             detections.append(dict(
-                boxes=rp["boxes"], boxes_scores=rp["scores"], boxes_hidden_states=rp["hidden_states"],
+                boxes=rp["boxes"], boxes_scores=rp["scores"], boxes_hidden_states=rp["hidden_states"], boxes_labels=rp["labels"],
                 unary_tokens=ut, pairwise_tokens=pt,
                 pairing=torch.stack([h[x], o[x]]),
                 scores=scores * pr[x, y], labels=y,

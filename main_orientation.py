@@ -185,13 +185,13 @@ if __name__ == '__main__':
     parser.add_argument('--pretrained', default='', help='Path to a pretrained detector')
     parser.add_argument('--resume', default='', help='Resume from a model')
     parser.add_argument('--output-dir', default='checkpoints')
-    parser.add_argument('--print-interval', default=100, type=int)
+    parser.add_argument('--print-interval', default=10, type=int)
     parser.add_argument('--world-size', default=1, type=int)
     parser.add_argument('--eval', action='store_true')
 
     parser.add_argument('--box-score-thresh', default=0.2, type=float)
     parser.add_argument('--fg-iou-thresh', default=0.5, type=float)
-    parser.add_argument('--min-instances', default=3, type=int)
+    parser.add_argument('--min-instances', default=1, type=int)
     parser.add_argument('--max-instances', default=15, type=int)
 
     args = parser.parse_args()

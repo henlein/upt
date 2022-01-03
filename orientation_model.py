@@ -1,9 +1,8 @@
-import torch.nn as nn
 from upt import build_detector
 import torch
 from torch import nn, Tensor
 from typing import Optional, List
-from torchvision.ops.boxes import box_iou
+from torchvision.ops.boxes import box_iou, batched_nms
 from ops import binary_focal_loss_with_logits
 import torch.distributed as dist
 
@@ -12,7 +11,7 @@ class OrientationModel(nn.Module):
     def __init__(self, args):
         super().__init__()
 
-        self.num_classes = 6
+        self.num_classes = 12
         self.fg_iou_thresh = args.fg_iou_thresh
         self.alpha = args.alpha
         self.gamma = args.gamma
@@ -36,7 +35,7 @@ class OrientationModel(nn.Module):
 
         self.ori_fc_1 = nn.Linear(256, 256)
         self.relu1 = nn.ReLU()
-        self.ori_fc_2 = nn.Linear(256, 12)
+        self.ori_fc_2 = nn.Linear(256, self.num_classes)
 
     def train(self, mode=True):
         super(OrientationModel, self).train(mode)
@@ -46,6 +45,9 @@ class OrientationModel(nn.Module):
         gt_bx = self.upt.recover_boxes(gold_boxes, image_size)
         x, y = torch.nonzero(box_iou(pred_boxes, gt_bx) >= self.fg_iou_thresh).unbind(1)
         labels = targets['labels'][y]
+        #print("x", x)
+        #print("y", y)
+        #print(labels)
         return labels, x
 
 
@@ -59,18 +61,34 @@ class OrientationModel(nn.Module):
         #for x in upt_feature:
         #    x.pop("attn_maps")
 
-        pred_boxes = [r['boxes'] for r in upt_feature]
         gold_boxes = [r['boxes'] for r in targets]
+
+        pred_boxes = [r['boxes'] for r in upt_feature]
+        pred_boxes_scores = [r['boxes_scores'] for r in upt_feature]
+        pred_boxes_label = [r['boxes_labels'] for r in upt_feature]
         pbox_features = [r['unary_tokens'] for r in upt_feature]
         if self.training:
             target_labels = []
             ffn_preds = []
-            for pbox, gbox, target, pbox_feature, image_size in zip(pred_boxes, gold_boxes, targets, pbox_features, image_sizes):
+            for pbox, pbox_l, gbox, target, pbox_feature, image_size in zip(pred_boxes, pred_boxes_label, gold_boxes, targets, pbox_features, image_sizes):
+                if pbox_feature.shape[0] == 0:
+                    continue
+                #print("==============")
+                #print("pbox", pbox)
+                #print("pbox_l", pbox_l)
+                #print("pbox_features", pbox_feature)
+                #print(str(pbox.shape) + " - " + str(pbox_feature.shape))
+                assert pbox.shape[0] == pbox_feature.shape[0]
+                #print("gbox", gbox)
+                #print("target", target)
+                #print("image_size", image_size)
                 target_label, target_idx = self.associate_with_ground_truth(pbox, gbox, target, image_size)
                 target_labels.append(target_label)
-                out1 = self.ori_fc_1(pbox_feature[target_idx])
+                filtered_pbox_feature = pbox_feature[target_idx]
+                out1 = self.ori_fc_1(filtered_pbox_feature)
                 out1 = self.relu1(out1)
                 ffn_preds.append(self.ori_fc_2(out1))
+                #print("---")
 
             target_labels = torch.cat(target_labels)
             ffn_preds = torch.cat(ffn_preds)
@@ -90,6 +108,6 @@ class OrientationModel(nn.Module):
             interaction_loss = interaction_loss / n_p
 
             loss_dict = dict(interaction_loss=interaction_loss)
-            print(loss_dict)
+            #print(loss_dict)
             return loss_dict
 
