@@ -206,8 +206,8 @@ class CustomisedDLE(DistributedLearningEngine):
         """
 
         for batch_idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
-            if batch_idx < 880:
-                continue
+            #if batch_idx < 880:
+            #    continue
             target = batch[-1][0]
             #if target["fileid"].item() not in filterdict:
             #    continue

@@ -1,0 +1,33 @@
+program: main_orientation.py
+method: bayes
+name: upt-ori-v1
+metric:
+  name: interaction_loss
+  goal: minimize
+parameters:
+  clip-max-norm:
+    min: 0.05
+    max: 0.2
+  lr-head:
+    min: 0.00005
+    max: 0.0005
+  weight-decay:
+    min: 0.00005
+    max: 0.0005
+  lr-drop:
+    min: 5
+    max: 20
+  ff1-hidden:
+    min: 128
+    max: 512
+  alpha:
+    min: 0.25
+    max: 0.7
+  gamma:
+    min: 0.1
+    max: 0.3
+  input-version:
+    values:
+      - 0
+      - 1
+      - 2

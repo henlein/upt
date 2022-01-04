@@ -38,7 +38,7 @@ with open(anju_anno_file) as json_file:
         test_json[key] = data[key]
     test_save_json = {"_via_img_metadata": test_json}
     with open(os.path.join(split_folder, "ALL_test.json"), 'w') as f:
-        json.dump(test_json, f)
+        json.dump(test_save_json, f)
 
 
 target_cats = ["apple", "bicycle", "bottle", "car", "chair", "cup", "dog", "horse", "knife", "umbrella"]

@@ -15,6 +15,7 @@ class OrientationModel(nn.Module):
         self.fg_iou_thresh = args.fg_iou_thresh
         self.alpha = args.alpha
         self.gamma = args.gamma
+        self.input_type = args.input_version
 
         class_corr = [[0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1],
                       [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1],
@@ -33,9 +34,13 @@ class OrientationModel(nn.Module):
         for param in self.upt.parameters():
             param.requires_grad = False
 
-        self.ori_fc_1 = nn.Linear(256, 256)
+        if self.input_type < 2:
+            self.ori_fc_1 = nn.Linear(256, args.ff1_hidden)
+        else:
+            self.ori_fc_1 = nn.Linear(512, args.ff1_hidden)
+
         self.relu1 = nn.ReLU()
-        self.ori_fc_2 = nn.Linear(256, self.num_classes)
+        self.ori_fc_2 = nn.Linear(args.ff1_hidden, self.num_classes)
 
     def train(self, mode=True):
         super(OrientationModel, self).train(mode)
@@ -45,9 +50,6 @@ class OrientationModel(nn.Module):
         gt_bx = self.upt.recover_boxes(gold_boxes, image_size)
         x, y = torch.nonzero(box_iou(pred_boxes, gt_bx) >= self.fg_iou_thresh).unbind(1)
         labels = targets['labels'][y]
-        #print("x", x)
-        #print("y", y)
-        #print(labels)
         return labels, x
 
 
@@ -58,8 +60,6 @@ class OrientationModel(nn.Module):
 
 
         upt_feature = self.upt(images)
-        #for x in upt_feature:
-        #    x.pop("attn_maps")
 
         gold_boxes = [r['boxes'] for r in targets]
 
@@ -67,28 +67,36 @@ class OrientationModel(nn.Module):
         pred_boxes_scores = [r['boxes_scores'] for r in upt_feature]
         pred_boxes_label = [r['boxes_labels'] for r in upt_feature]
         pbox_features = [r['unary_tokens'] for r in upt_feature]
-        if self.training:
+        pbox_features_net = [r['boxes_hidden_states'] for r in upt_feature]
+        if self.training or not self.training: #TODO: Für jetzt reicht es, aber nicht auf Dauer ...
             target_labels = []
             ffn_preds = []
-            for pbox, pbox_l, gbox, target, pbox_feature, image_size in zip(pred_boxes, pred_boxes_label, gold_boxes, targets, pbox_features, image_sizes):
+            for pbox, pbox_l, gbox, target, pbox_feature, image_size, pbox_feature_net in \
+                    zip(pred_boxes, pred_boxes_label, gold_boxes, targets, pbox_features, image_sizes, pbox_features_net):
                 if pbox_feature.shape[0] == 0:
                     continue
-                #print("==============")
-                #print("pbox", pbox)
-                #print("pbox_l", pbox_l)
-                #print("pbox_features", pbox_feature)
-                #print(str(pbox.shape) + " - " + str(pbox_feature.shape))
                 assert pbox.shape[0] == pbox_feature.shape[0]
-                #print("gbox", gbox)
-                #print("target", target)
-                #print("image_size", image_size)
+                assert pbox_feature_net.shape[0] == pbox_feature.shape[0]
+
                 target_label, target_idx = self.associate_with_ground_truth(pbox, gbox, target, image_size)
                 target_labels.append(target_label)
                 filtered_pbox_feature = pbox_feature[target_idx]
-                out1 = self.ori_fc_1(filtered_pbox_feature)
+                filtered_pbox_net_feature = pbox_feature_net[target_idx]
+
+                input_feature = None
+                if self.input_type == 0:
+                    input_feature = filtered_pbox_net_feature
+                elif self.input_type == 1:
+                    input_feature = filtered_pbox_feature
+                elif self.input_type == 2:
+                    input_feature = torch.cat((filtered_pbox_feature, filtered_pbox_net_feature), dim=1)
+                else:
+                    print("Not supportet Model Input Type")
+                    exit()
+
+                out1 = self.ori_fc_1(input_feature)
                 out1 = self.relu1(out1)
                 ffn_preds.append(self.ori_fc_2(out1))
-                #print("---")
 
             target_labels = torch.cat(target_labels)
             ffn_preds = torch.cat(ffn_preds)
@@ -102,12 +110,10 @@ class OrientationModel(nn.Module):
                 n_p = (n_p / world_size).item()
 
             interaction_loss = binary_focal_loss_with_logits(
-            torch.log(1 / torch.exp(-ffn_preds) + 1e-8),
-                target_labels, reduction='sum', alpha=self.alpha, gamma=self.gamma)
+            torch.log(1 / torch.exp(-ffn_preds) + 1e-8), target_labels, reduction='sum', alpha=self.alpha, gamma=self.gamma)
 
             interaction_loss = interaction_loss / n_p
 
             loss_dict = dict(interaction_loss=interaction_loss)
-            #print(loss_dict)
-            return loss_dict
+            return loss_dict, (ffn_preds, target_labels)
 

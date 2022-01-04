@@ -458,7 +458,7 @@ def binary_focal_loss_with_logits(
     Parameters:
     -----------
     x: Tensor[N, K]
-        Post-normalisation scores
+        Post-ormalisation scoresn
     y: Tensor[N, K]
         Binary labels
     alpha: float

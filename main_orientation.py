@@ -13,12 +13,15 @@ import torch
 import random
 import warnings
 import argparse
+import wandb
+from tqdm import tqdm
 import numpy as np
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.utils.data import DataLoader, DistributedSampler
 from hicodet.hicodet_orientation import HICODetOri, DataFactoryOri
 from pocket.core import DistributedLearningEngine
+import pocket
 from upt import build_detector
 from utils import custom_collate
 from orientation_model import OrientationModel
@@ -29,9 +32,15 @@ def main(rank, args):
         backend="nccl",
         #backend="gloo",
         init_method="env://",
-        world_size=args.world_size,
+        world_size=1,
         rank=rank
     )
+    print("::::::::::::")
+    print(rank)
+    wandb.init(config=args)
+    args = wandb.config
+    print(args)
+
     # Fix seed
     seed = args.seed + rank
     torch.manual_seed(seed)
@@ -39,46 +48,52 @@ def main(rank, args):
     random.seed(seed)
 
     torch.cuda.set_device(rank)
-    dataset = HICODetOri(
+    train_dataset = HICODetOri(
         root=os.path.join(args.data_root, 'hico_20160224_det/images', "train2015"),
-        anno_ori_file=os.path.join(args.data_root, "via234_780 items_Dec 23.json")
+        anno_ori_file=os.path.join(args.data_root, "orientation_annotation", "ALL_train.json")
     )
-    #train_dataset, test_dataset = dataset.split(0.8)
+    test_dataset = HICODetOri(
+        root=os.path.join(args.data_root, 'hico_20160224_det/images', "train2015"),
+        anno_ori_file=os.path.join(args.data_root, "orientation_annotation", "ALL_test.json")
+    )
 
-    trainset = DataFactoryOri(dataset, "train", True)
-    #testset = DataFactoryOri(test_dataset, "test", False)
+    trainset = DataFactoryOri(train_dataset, "train", True)
+    testset = DataFactoryOri(test_dataset, "test", False)
     print("DataFactory created")
     train_loader = DataLoader(
         dataset=trainset,
         collate_fn=custom_collate, batch_size=args.batch_size,
         num_workers=args.num_workers, pin_memory=True, drop_last=True,
         sampler=DistributedSampler(
-            trainset, 
-            num_replicas=args.world_size, 
+            trainset,
+            num_replicas=args.world_size,
             rank=rank)
     )
-    #test_loader = DataLoader(
-    #    dataset=testset,
-    #    collate_fn=custom_collate, batch_size=1,
-    #    num_workers=args.num_workers, pin_memory=True, drop_last=False,
-    #    sampler=torch.utils.data.SequentialSampler(testset)
-    #)
+
+    test_loader = DataLoader(
+        dataset=testset,
+        collate_fn=custom_collate, batch_size=1,
+        num_workers=args.num_workers, pin_memory=True, drop_last=False,
+        sampler=torch.utils.data.SequentialSampler(testset)
+    )
     print("Loader created")
 
     args.human_idx = 1
     args.num_classes = 2
 
     orimodel = OrientationModel(args)
-    #orimodel.cuda()
+    if rank == 0:
+        wandb.watch(orimodel, log_freq=args.print_interval)
 
     print("CustomisedDLE")
+    print(args.output_dir + "/" + wandb.run.name + "/")
     engine = OrientationDLE(
-        orimodel, train_loader,
+        orimodel, train_loader, test_loader,
         max_norm=args.clip_max_norm,
         num_classes=args.num_classes,
         print_interval=args.print_interval,
-        find_unused_parameters=True,
-        cache_dir=args.output_dir
+        #find_unused_parameters=True,
+        cache_dir=args.output_dir+ "/" + wandb.run.name + "/"
     )
 
     params = []
@@ -99,39 +114,22 @@ def main(rank, args):
     engine(args.epochs)
 
 
-    """
-    max_norm = args.clip_max_norm
-    for _ in range(20):
-        for batch in train_loader:
-            inputs = batch[:-1]
-            targets = batch[-1]
-            loss_dict = orimodel(*inputs, targets=targets)
-            print(loss_dict)
-            if loss_dict['interaction_loss'].isnan():
-                raise ValueError(f"The HOI loss is NaN")
-
-            loss = sum(loss for loss in loss_dict.values())
-            optim.zero_grad(set_to_none=True)
-            loss.backward()
-            if max_norm > 0:
-                torch.nn.utils.clip_grad_norm_(orimodel.parameters(), max_norm)
-            optim.step()
-        lr_scheduler.step()
-    """
-
 class OrientationDLE(DistributedLearningEngine):
-    def __init__(self, net, dataloader, max_norm=0, num_classes=117, **kwargs):
+    def __init__(self, net, dataloader, test_loader, max_norm=0, num_classes=117, **kwargs):
         super().__init__(net, None, dataloader, **kwargs)
         self.max_norm = max_norm
         self.num_classes = num_classes
+        self.test_loader = test_loader
 
     def _on_each_iteration(self):
-        loss_dict = self._state.net(
+        loss_dict, _ = self._state.net(
             *self._state.inputs, targets=self._state.targets)
 
         if loss_dict['interaction_loss'].isnan():
             raise ValueError(f"The HOI loss is NaN for rank {self._rank}")
 
+        if self._rank == 0:
+            wandb.log(loss_dict)
         self._state.loss = sum(loss for loss in loss_dict.values())
         self._state.optimizer.zero_grad(set_to_none=True)
         self._state.loss.backward()
@@ -139,13 +137,57 @@ class OrientationDLE(DistributedLearningEngine):
             torch.nn.utils.clip_grad_norm_(self._state.net.parameters(), self.max_norm)
         self._state.optimizer.step()
 
+    def _on_end_epoch(self):
+        if self._rank == 0:
+            self.save_checkpoint()
+            eval_results = self.test_orientation()
+            wandb.log(eval_results)
+
+        if self._state.lr_scheduler is not None:
+            self._state.lr_scheduler.step()
+
+    @torch.no_grad()
+    def test_orientation(self):
+        net = self._state.net
+        net.eval()
+
+        all_correct = 0
+        idx_correct = 0
+        total_all = 0
+        total_idx = 0
+        total_loss = []
+        for batch_idx, batch in tqdm(enumerate(self.test_loader), total=len(self.test_loader)):
+            inputs = pocket.ops.relocate_to_cuda(batch)
+            eval_loss, (pred_lab, gold_lab) = net(inputs[0], inputs[1])
+            total_loss.append(eval_loss["interaction_loss"].item())
+            pred_lab = pred_lab.sigmoid()
+            pred_lab = torch.round(pred_lab)
+
+            for pred, gold in zip(pred_lab, gold_lab):
+                if torch.equal(pred, gold):
+                    all_correct += 1
+                total_all += 1
+                for pr_e, g_e in zip(pred, gold):
+                    if torch.equal(pr_e, g_e):
+                        idx_correct += 1
+                    total_idx += 1
+            #print(str(all_correct) + " - " + str(total_all))
+            #print(str(idx_correct) + " - " + str(total_idx))
+            #print(str(all_correct / total_all) + " - " + str(idx_correct / total_idx))
+
+        results = {"eval_loss": sum(total_loss) / len(self.test_loader),
+                   "all_correct": all_correct / total_all,
+                   "idx_correct": idx_correct / total_idx}
+        return results
+
 
 if __name__ == '__main__':
+    print("Test")
     parser = argparse.ArgumentParser()
     parser.add_argument('--lr-head', default=1e-4, type=float)
-    parser.add_argument('--batch-size', default=2, type=int)
+    parser.add_argument('--batch-size', default=8, type=int)
     parser.add_argument('--weight-decay', default=1e-4, type=float)
-    parser.add_argument('--epochs', default=20, type=int)
+    parser.add_argument('--epochs', default=1, type=int)
     parser.add_argument('--lr-drop', default=10, type=int)
     parser.add_argument('--clip-max-norm', default=0.1, type=float)
 
@@ -194,10 +236,11 @@ if __name__ == '__main__':
     parser.add_argument('--min-instances', default=1, type=int)
     parser.add_argument('--max-instances', default=15, type=int)
 
-    args = parser.parse_args()
+    parser.add_argument('--ff1-hidden', default=256, type=int)
+    parser.add_argument('--input-version', default=0, type=int) # 0=ModelNet, 1=Trans, 2=Merge
 
-    #main(0, args)
+    args = parser.parse_args()
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = args.port
 
-    mp.spawn(main, nprocs=args.world_size, args=(args,))
+    mp.spawn(main, nprocs=1, args=(args,))
