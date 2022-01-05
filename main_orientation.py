@@ -18,6 +18,7 @@ from tqdm import tqdm
 import numpy as np
 import torch.distributed as dist
 import torch.multiprocessing as mp
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, DistributedSampler
 from hicodet.hicodet_orientation import HICODetOri, DataFactoryOri
 from pocket.core import DistributedLearningEngine
@@ -30,14 +31,13 @@ warnings.filterwarnings("ignore")
 def main(rank, args):
     dist.init_process_group(
         backend="nccl",
-        #backend="gloo",
         init_method="env://",
         world_size=1,
         rank=rank
     )
     print("::::::::::::")
     print(rank)
-    wandb.init(config=args)
+    wandb.init(project="UPT-ORI Test", config=args)
     args = wandb.config
     print(args)
 
@@ -81,7 +81,9 @@ def main(rank, args):
     args.human_idx = 1
     args.num_classes = 2
 
-    orimodel = OrientationModel(args)
+    label_weights = train_dataset.dataset_weights
+    print(label_weights)
+    orimodel = OrientationModel(args, label_weights)
     if rank == 0:
         wandb.watch(orimodel, log_freq=args.print_interval)
 
@@ -108,10 +110,10 @@ def main(rank, args):
         weight_decay=args.weight_decay
     )
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optim, args.lr_drop)
-
     engine.update_state_key(optimizer=optim, lr_scheduler=lr_scheduler)
     engine.save_checkpoint()
     engine(args.epochs)
+
 
 
 class OrientationDLE(DistributedLearningEngine):
@@ -141,10 +143,15 @@ class OrientationDLE(DistributedLearningEngine):
         if self._rank == 0:
             self.save_checkpoint()
             eval_results = self.test_orientation()
+            print(eval_results)
             wandb.log(eval_results)
 
         if self._state.lr_scheduler is not None:
             self._state.lr_scheduler.step()
+
+    def _on_end(self):
+        if self._rank == 0:
+            wandb.finish(0)
 
     @torch.no_grad()
     def test_orientation(self):
@@ -155,14 +162,22 @@ class OrientationDLE(DistributedLearningEngine):
         idx_correct = 0
         total_all = 0
         total_idx = 0
+
+        all_correct_soft = 0
+
         total_loss = []
         for batch_idx, batch in tqdm(enumerate(self.test_loader), total=len(self.test_loader)):
             inputs = pocket.ops.relocate_to_cuda(batch)
             eval_loss, (pred_lab, gold_lab) = net(inputs[0], inputs[1])
             total_loss.append(eval_loss["interaction_loss"].item())
+            print("....")
+            print(gold_lab)
+            pred_lab_soft = F.softmax(pred_lab, dim=1)
             pred_lab = pred_lab.sigmoid()
+            print(pred_lab)
+            print(pred_lab_soft)
             pred_lab = torch.round(pred_lab)
-
+            print(pred_lab)
             for pred, gold in zip(pred_lab, gold_lab):
                 if torch.equal(pred, gold):
                     all_correct += 1
@@ -171,23 +186,25 @@ class OrientationDLE(DistributedLearningEngine):
                     if torch.equal(pr_e, g_e):
                         idx_correct += 1
                     total_idx += 1
-            #print(str(all_correct) + " - " + str(total_all))
-            #print(str(idx_correct) + " - " + str(total_idx))
-            #print(str(all_correct / total_all) + " - " + str(idx_correct / total_idx))
+            _, predicted = torch.max(pred_lab_soft, 1)
+            _, gold = torch.max(gold_lab, 1)
+            print(predicted)
+            print(gold)
+            all_correct_soft += (predicted == gold).sum().item()
 
         results = {"eval_loss": sum(total_loss) / len(self.test_loader),
                    "all_correct": all_correct / total_all,
+                   "all_correct_soft": all_correct_soft / total_all,
                    "idx_correct": idx_correct / total_idx}
         return results
 
 
 if __name__ == '__main__':
-    print("Test")
     parser = argparse.ArgumentParser()
     parser.add_argument('--lr-head', default=1e-4, type=float)
-    parser.add_argument('--batch-size', default=8, type=int)
+    parser.add_argument('--batch-size', default=4, type=int)
     parser.add_argument('--weight-decay', default=1e-4, type=float)
-    parser.add_argument('--epochs', default=1, type=int)
+    parser.add_argument('--epochs', default=5, type=int)
     parser.add_argument('--lr-drop', default=10, type=int)
     parser.add_argument('--clip-max-norm', default=0.1, type=float)
 
@@ -227,7 +244,7 @@ if __name__ == '__main__':
     parser.add_argument('--pretrained', default='', help='Path to a pretrained detector')
     parser.add_argument('--resume', default='', help='Resume from a model')
     parser.add_argument('--output-dir', default='checkpoints')
-    parser.add_argument('--print-interval', default=10, type=int)
+    parser.add_argument('--print-interval', default=12, type=int)
     parser.add_argument('--world-size', default=1, type=int)
     parser.add_argument('--eval', action='store_true')
 
@@ -237,7 +254,8 @@ if __name__ == '__main__':
     parser.add_argument('--max-instances', default=15, type=int)
 
     parser.add_argument('--ff1-hidden', default=256, type=int)
-    parser.add_argument('--input-version', default=0, type=int) # 0=ModelNet, 1=Trans, 2=Merge
+    parser.add_argument('--input-version', default=1, type=int)  # 0=ModelNet, 1=Transformer, 2=Merge
+    parser.add_argument('--loss-version', default=1, type=int)  # weight, stock
 
     args = parser.parse_args()
     os.environ["MASTER_ADDR"] = "localhost"

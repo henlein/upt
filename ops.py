@@ -253,6 +253,7 @@ class HungarianMatcher(nn.Module):
         indices = [linear_sum_assignment(c.cpu()) for c in C]
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
 
+
 class SetCriterion(nn.Module):
     def __init__(self, args) -> None:
         super().__init__()
@@ -363,9 +364,6 @@ class SetCriterion(nn.Module):
         indices = self.matcher(bx_h, bx_o, objects, prior, logits, targets)
 
         loss_dict = {"focal_loss": self.focal_loss(bx_h, bx_o, indices, prior, logits, targets)}
-        # loss_dict.update(self.regression_loss(
-        #     bx_h, bx_o, bx_h_post, bx_o_post, indices, targets, bbox_deltas.split(n)
-        # ))
 
         return loss_dict
 

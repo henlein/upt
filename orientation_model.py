@@ -1,6 +1,8 @@
 from upt import build_detector
+import numpy as np
 import torch
 from torch import nn, Tensor
+from torch.nn.functional import binary_cross_entropy_with_logits
 from typing import Optional, List
 from torchvision.ops.boxes import box_iou, batched_nms
 from ops import binary_focal_loss_with_logits
@@ -8,15 +10,16 @@ import torch.distributed as dist
 
 
 class OrientationModel(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args, label_weights=None):
         super().__init__()
 
-        self.num_classes = 12
+        self.num_classes = 6
         self.fg_iou_thresh = args.fg_iou_thresh
         self.alpha = args.alpha
         self.gamma = args.gamma
         self.input_type = args.input_version
-
+        self.loss_type = args.loss_version
+        self.label_weights = label_weights
         class_corr = [[0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1],
                       [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1],
                       [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1],
@@ -51,7 +54,6 @@ class OrientationModel(nn.Module):
         x, y = torch.nonzero(box_iou(pred_boxes, gt_bx) >= self.fg_iou_thresh).unbind(1)
         labels = targets['labels'][y]
         return labels, x
-
 
     def forward(self, images: List[Tensor], targets: Optional[List[dict]] = None):
         image_sizes = torch.as_tensor([
@@ -109,8 +111,18 @@ class OrientationModel(nn.Module):
                 dist.all_reduce(n_p)
                 n_p = (n_p / world_size).item()
 
-            interaction_loss = binary_focal_loss_with_logits(
-            torch.log(1 / torch.exp(-ffn_preds) + 1e-8), target_labels, reduction='sum', alpha=self.alpha, gamma=self.gamma)
+            if self.loss_type == 0:
+                interaction_loss = binary_cross_entropy_with_logits(ffn_preds, target_labels,
+                                                                reduction='sum', weight=self.label_weights)
+            elif self.loss_type == 1:
+                interaction_loss = binary_focal_loss_with_logits(
+                   torch.log(1 / torch.exp(-ffn_preds) + 1e-8), target_labels, reduction='sum', alpha=self.alpha, gamma=self.gamma)
+            else:
+                print("Not supportet Loss Type")
+                exit()
+
+            #interaction_loss = binary_focal_loss_with_logits(
+            #   torch.log(1 / torch.exp(-ffn_preds) + 1e-8), target_labels, reduction='sum', alpha=self.alpha, gamma=self.gamma)
 
             interaction_loss = interaction_loss / n_p
 

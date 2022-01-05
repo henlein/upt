@@ -10,7 +10,7 @@ Australian Centre for Robotic Vision
 import os
 import json
 import numpy as np
-import pocket
+#import pocket
 import datasets.transforms as T
 from typing import Optional, List, Callable, Tuple
 from torch.utils.data import Dataset
@@ -46,25 +46,10 @@ class HICODetOri(ImageDataset):
         return len(self._anno)
 
     def __getitem__(self, i: int) -> tuple:
-        """
-        Arguments:
-            i(int): Index to an image
-
-        Returns:
-            tuple[image, target]: By default, the tuple consists of a PIL image and a
-                dict with the following keys:
-                    "boxes_h": list[list[4]]
-                    "boxes_o": list[list[4]]
-                    "hoi":: list[N]
-                    "verb": list[N]
-                    "object": list[N]
-        """
         anno = self._anno[i]
 
         fileid = [x for x in anno["filename"] if x.isdigit()]
         fileid_int = int(''.join(fileid[4:]))
-
-        #self._anno.append({"filename": anno["filename"], "boxes": torch.tensor(bboxes), "front": fronts, "up": ups, "object": torch.tensor(names), "labels": torch.FloatTensor(labels)})
 
         id_anno = {"fileid": torch.tensor(fileid_int), "boxes": anno["boxes"], "object": anno["object"], "labels": anno["labels"]}
         return self.load_image(os.path.join(self._root, self._anno[i]["filename"])), id_anno
@@ -91,15 +76,6 @@ class HICODetOri(ImageDataset):
         return self._anno
 
     def split(self, ratio: float) -> Tuple[HICODetOriSubset, HICODetOriSubset]:
-        """
-        Split the dataset according to given ratio
-
-        Arguments:
-            ratio(float): The percentage of training set between 0 and 1
-        Returns:
-            train(Dataset)
-            val(Dataset)
-        """
         perm = np.random.permutation(len(self._anno))
         n = int(len(perm) * ratio)
         return HICODetOriSubset(self, perm[:n]), HICODetOriSubset(self, perm[n:])
@@ -129,6 +105,14 @@ class HICODetOri(ImageDataset):
             print(ori_dict)
             print("!!!!!!!!!!!!!!!!!")
         return vector
+
+    def calculate_pos_weights(self, class_counts, data_size):
+        #https://stackoverflow.com/questions/57021620/how-to-calculate-unbalanced-weights-for-bcewithlogitsloss-in-pytorch
+        pos_weights = np.ones_like(class_counts)
+        neg_counts = [data_size - pos_count for pos_count in class_counts]
+        for cdx, (pos_count, neg_count) in enumerate(zip(class_counts, neg_counts)):
+            pos_weights[cdx] = neg_count / (pos_count + 1e-5)
+        return torch.as_tensor(pos_weights, dtype=torch.float, device='cuda')
 
     def _load_annotation_and_metadata(self, f: dict) -> None:
         """
@@ -233,6 +217,9 @@ class HICODetOri(ImageDataset):
             "zebra": 24
         }
 
+        count_regions = 0
+        count_labels = torch.zeros(6)
+        zero_label_vec = torch.zeros(6)
         for anno_idx, (anno_key, anno) in enumerate(f["_via_img_metadata"].items()):
             bboxes = []
             fronts = []
@@ -258,15 +245,27 @@ class HICODetOri(ImageDataset):
                     exit()
                 if name not in self.label2id:
                     continue
+                if all(v == 0 for v in front_vec):
+                    continue
+
+
                 bboxes.append(bbox)
                 fronts.append(front_vec)
                 ups.append(up_vec)
                 names.append(self.label2id[name])
-                labels.append(front_vec + up_vec)
+                labels.append(front_vec)# + up_vec)
 
             if len(bboxes) > 0:
-                self._anno.append({"filename": anno["filename"], "boxes": torch.tensor(bboxes), "front": fronts, "up": ups, "object": torch.tensor(names), "labels": torch.FloatTensor(labels)})
+                anno_dict = {"filename": anno["filename"], "boxes": torch.tensor(bboxes), "front": fronts, "up": ups, "object": torch.tensor(names), "labels": torch.FloatTensor(labels)}
+                self._anno.append(anno_dict)
+                for lab in anno_dict["labels"]:
+                    count_labels += lab
+                    count_regions += 1
 
+        print(count_regions)
+        print(count_labels)
+        self.dataset_weights = self.calculate_pos_weights(count_labels, count_regions)
+        print(self.dataset_weights)
 
 class DataFactoryOri(Dataset):
     def __init__(self, dataset, name, train: bool):
@@ -316,6 +315,6 @@ if __name__ == "__main__":
         root=os.path.join("D:/Corpora/HICO-DET", 'hico_20160224_det/images', "train2015"),
         anno_ori_file=os.path.join("D:/Corpora/HICO-DET", "via234_780 items_Dec 23.json")
     )
-    train_datset, test_dataset = dataset.split(0.8)
-    factory = DataFactoryOri(train_datset, "test", True)
-    print(factory[0])
+    #train_datset, test_dataset = dataset.split(0.8)
+    #factory = DataFactoryOri(train_datset, "test", True)
+    #print(factory[0])
