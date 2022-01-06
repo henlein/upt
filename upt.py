@@ -152,7 +152,7 @@ class UPT(nn.Module):
     def prepare_region_proposals(self, results, hidden_states):
         region_props = []
         for res, hs in zip(results, hidden_states):
-            sc, lb, bx = res.values()  #Score, LAbel
+            sc, lb, bx = res.values()  #Score, Label
 
             keep = batched_nms(bx, sc, lb, 0.5)
             sc = sc[keep].view(-1)
@@ -198,13 +198,13 @@ class UPT(nn.Module):
 
         return region_props
 
-    def postprocessing(self, region_props, bh, bo, logits, prior, objects, attn_maps, image_sizes, unary_tokens, pairwise_tokens):
+    def postprocessing(self, region_props, bh, bo, logits, prior, objects, attn_maps, image_sizes, unary_tokens, pairwise_tokens, box_pair_spatial):
         n = [len(b) for b in bh]
         logits = logits.split(n)
 
         detections = []
-        for rp, h, o, lg, pr, obj, attn, size, ut, pt in zip(
-            region_props, bh, bo, logits, prior, objects, attn_maps, image_sizes, unary_tokens, pairwise_tokens
+        for rp, h, o, lg, pr, obj, attn, size, ut, pt, bps in zip(
+            region_props, bh, bo, logits, prior, objects, attn_maps, image_sizes, unary_tokens, pairwise_tokens, box_pair_spatial
         ):
             pr = pr.prod(0)
             x, y = torch.nonzero(pr).unbind(1)
@@ -214,7 +214,8 @@ class UPT(nn.Module):
                 unary_tokens=ut, pairwise_tokens=pt,
                 pairing=torch.stack([h[x], o[x]]),
                 scores=scores * pr[x, y], labels=y,
-                objects=obj[x], attn_maps=attn, size=size, prior=pr
+                objects=obj[x], attn_maps=attn, size=size, prior=pr,
+                box_pair_spatial=bps
             ))
 
         return detections
@@ -271,8 +272,7 @@ class UPT(nn.Module):
         results = self.postprocessor(results, image_sizes)
 
         region_props = self.prepare_region_proposals(results, outputs)
-
-        logits, prior, bh, bo, objects, attn_maps, unary_tokens, pairwise_tokens = self.interaction_head(
+        logits, prior, bh, bo, objects, attn_maps, unary_tokens, pairwise_tokens, box_pair_spatial = self.interaction_head(
             src, image_sizes, region_props
         )
 
@@ -286,7 +286,7 @@ class UPT(nn.Module):
             return loss_dict
 
         detections = self.postprocessing(region_props, bh, bo, logits, prior, objects, attn_maps, image_sizes,
-                                         unary_tokens, pairwise_tokens)
+                                         unary_tokens, pairwise_tokens, box_pair_spatial)
         return detections
 
 

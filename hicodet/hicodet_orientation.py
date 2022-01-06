@@ -253,7 +253,8 @@ class HICODetOri(ImageDataset):
                 fronts.append(front_vec)
                 ups.append(up_vec)
                 names.append(self.label2id[name])
-                labels.append(front_vec)# + up_vec)
+                #labels.append(front_vec)# + up_vec)
+                labels.append(up_vec)
 
             if len(bboxes) > 0:
                 anno_dict = {"filename": anno["filename"], "boxes": torch.tensor(bboxes), "front": fronts, "up": ups, "object": torch.tensor(names), "labels": torch.FloatTensor(labels)}

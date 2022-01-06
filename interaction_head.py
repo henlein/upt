@@ -298,6 +298,7 @@ class InteractionHead(nn.Module):
         pairwise_tokens_collated = []
         attn_maps_collated = []
         unary_tokens_collated = []
+        box_pair_spatial_reshaped_collated = []
         for b_idx, props in enumerate(region_props):
             #print("####")
             boxes = props['boxes']
@@ -309,16 +310,7 @@ class InteractionHead(nn.Module):
             is_human = labels == self.human_idx
             n_h = torch.sum(is_human)
             n = len(boxes)
-            # Permute human instances to the top
-            if not torch.all(labels[:n_h] == self.human_idx):
-                h_idx = torch.nonzero(is_human).squeeze(1)
-                o_idx = torch.nonzero(is_human == 0).squeeze(1)
-                perm = torch.cat([h_idx, o_idx])
-                boxes = boxes[perm]
-                scores = scores[perm]
-                labels = labels[perm]
-                unary_tokens = unary_tokens[perm]
-            #print(unary_tokens.shape)
+
             # Skip image when there are no valid human-object pairs
             if n_h == 0 or n <= 1:
                 pairwise_tokens_collated.append(torch.zeros(
@@ -330,6 +322,7 @@ class InteractionHead(nn.Module):
                 object_class_collated.append(torch.zeros(0, device=device, dtype=torch.int64))
                 prior_collated.append(torch.zeros(2, 0, self.num_classes, device=device))
                 unary_tokens_collated.append(torch.zeros(0, device=device, dtype=torch.int64))
+                box_pair_spatial_reshaped_collated.append(torch.zeros(0, device=device, dtype=torch.int64))
                 continue
 
             # Get the pairwise indices
@@ -355,6 +348,19 @@ class InteractionHead(nn.Module):
 
             # Run the cooperative layer
             unary_tokens, unary_attn = self.coop_layer(unary_tokens, box_pair_spatial_reshaped)
+
+            # Permute human instances to the top
+            if not torch.all(labels[:n_h] == self.human_idx):
+                print("Should Never Happen!!!!!!!!!!!!!!!!!!!")
+                h_idx = torch.nonzero(is_human).squeeze(1)
+                o_idx = torch.nonzero(is_human == 0).squeeze(1)
+                perm = torch.cat([h_idx, o_idx])
+                scores = scores[perm]
+                labels = labels[perm]
+                unary_tokens = unary_tokens[perm]
+                unary_attn = unary_attn[perm]
+                box_pair_spatial_reshaped = box_pair_spatial_reshaped[perm]
+
             #print(unary_tokens.shape)
             # Generate pairwise tokens with MBF
             pairwise_tokens = torch.cat([
@@ -379,10 +385,11 @@ class InteractionHead(nn.Module):
             )
             attn_maps_collated.append((unary_attn, pairwise_attn))
             unary_tokens_collated.append(unary_tokens)
+            box_pair_spatial_reshaped_collated.append(box_pair_spatial_reshaped)
 
         pairwise_tokens_collated = torch.cat(pairwise_tokens_collated)
         logits = self.box_pair_predictor(pairwise_tokens_collated)
 
         return logits, prior_collated, \
             boxes_h_collated, boxes_o_collated, object_class_collated, attn_maps_collated, \
-               unary_tokens_collated, pairwise_tokens_collated
+               unary_tokens_collated, pairwise_tokens_collated, box_pair_spatial_reshaped_collated

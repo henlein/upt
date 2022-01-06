@@ -13,7 +13,7 @@ import torch
 import random
 import warnings
 import argparse
-import wandb
+#import wandb
 from tqdm import tqdm
 import numpy as np
 import torch.distributed as dist
@@ -21,12 +21,45 @@ import torch.multiprocessing as mp
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, DistributedSampler
 from hicodet.hicodet_orientation import HICODetOri, DataFactoryOri
+from util import box_ops
 from pocket.core import DistributedLearningEngine
 import pocket
 from upt import build_detector
 from utils import custom_collate
 from orientation_model import OrientationModel
 warnings.filterwarnings("ignore")
+
+def get_iou(bb1, bb2):
+    assert bb1['x1'] < bb1['x2']
+    assert bb1['y1'] < bb1['y2']
+    assert bb2['x1'] < bb2['x2']
+    assert bb2['y1'] < bb2['y2']
+
+    # determine the coordinates of the intersection rectangle
+    x_left = max(bb1['x1'], bb2['x1'])
+    y_top = max(bb1['y1'], bb2['y1'])
+    x_right = min(bb1['x2'], bb2['x2'])
+    y_bottom = min(bb1['y2'], bb2['y2'])
+
+    if x_right < x_left or y_bottom < y_top:
+        return 0.0
+
+    # The intersection of two axis-aligned bounding boxes is always an
+    # axis-aligned bounding box
+    intersection_area = (x_right - x_left) * (y_bottom - y_top)
+
+    # compute the area of both AABBs
+    bb1_area = (bb1['x2'] - bb1['x1']) * (bb1['y2'] - bb1['y1'])
+    bb2_area = (bb2['x2'] - bb2['x1']) * (bb2['y2'] - bb2['y1'])
+
+    # compute the intersection over union by taking the intersection
+    # area and dividing it by the sum of prediction + ground-truth
+    # areas - the interesection area
+    iou = intersection_area / float(bb1_area + bb2_area - intersection_area)
+    assert iou >= 0.0
+    assert iou <= 1.0
+    return iou
+
 
 def main(rank, args):
     dist.init_process_group(
@@ -37,8 +70,8 @@ def main(rank, args):
     )
     print("::::::::::::")
     print(rank)
-    wandb.init(project="UPT-ORI Test", config=args)
-    args = wandb.config
+    #.init(project="UPT-ORI Test", config=args)
+    #args = wandb.config
     print(args)
 
     # Fix seed
@@ -84,18 +117,19 @@ def main(rank, args):
     label_weights = train_dataset.dataset_weights
     print(label_weights)
     orimodel = OrientationModel(args, label_weights)
-    if rank == 0:
-        wandb.watch(orimodel, log_freq=args.print_interval)
+    #if rank == 0:
+    #    wandb.watch(orimodel, log_freq=args.print_interval)
 
     print("CustomisedDLE")
-    print(args.output_dir + "/" + wandb.run.name + "/")
+    #print(args.output_dir + "/" + wandb.run.name + "/")
     engine = OrientationDLE(
         orimodel, train_loader, test_loader,
         max_norm=args.clip_max_norm,
         num_classes=args.num_classes,
         print_interval=args.print_interval,
         #find_unused_parameters=True,
-        cache_dir=args.output_dir+ "/" + wandb.run.name + "/"
+        #cache_dir=args.output_dir+ "/" + wandb.run.name + "/"
+        cache_dir = args.output_dir + "/test/"
     )
 
     params = []
@@ -113,7 +147,7 @@ def main(rank, args):
     engine.update_state_key(optimizer=optim, lr_scheduler=lr_scheduler)
     engine.save_checkpoint()
     engine(args.epochs)
-
+    #wandb.finish(0)
 
 
 class OrientationDLE(DistributedLearningEngine):
@@ -130,8 +164,8 @@ class OrientationDLE(DistributedLearningEngine):
         if loss_dict['interaction_loss'].isnan():
             raise ValueError(f"The HOI loss is NaN for rank {self._rank}")
 
-        if self._rank == 0:
-            wandb.log(loss_dict)
+        #if self._rank == 0:
+        #    wandb.log(loss_dict)
         self._state.loss = sum(loss for loss in loss_dict.values())
         self._state.optimizer.zero_grad(set_to_none=True)
         self._state.loss.backward()
@@ -144,58 +178,74 @@ class OrientationDLE(DistributedLearningEngine):
             self.save_checkpoint()
             eval_results = self.test_orientation()
             print(eval_results)
-            wandb.log(eval_results)
+            #wandb.log(eval_results)
 
         if self._state.lr_scheduler is not None:
             self._state.lr_scheduler.step()
 
-    def _on_end(self):
-        if self._rank == 0:
-            wandb.finish(0)
+    #def _on_end(self):
+        #if self._rank == 0:
+            #wandb.finish(0)
+        #if dist.is_initialized():
+        #    dist.j
+
+    def recover_boxes(self, boxes, size):
+        boxes = box_ops.box_cxcywh_to_xyxy(boxes)
+        h, w = size
+        scale_fct = torch.stack([w, h, w, h])
+        boxes = boxes * scale_fct
+        return boxes
 
     @torch.no_grad()
     def test_orientation(self):
         net = self._state.net
         net.eval()
 
-        all_correct = 0
-        idx_correct = 0
-        total_all = 0
-        total_idx = 0
+        correct_id = 0
+        found_id = 0
+        all_all_pred = 0
 
-        all_correct_soft = 0
-
-        total_loss = []
         for batch_idx, batch in tqdm(enumerate(self.test_loader), total=len(self.test_loader)):
             inputs = pocket.ops.relocate_to_cuda(batch)
-            eval_loss, (pred_lab, gold_lab) = net(inputs[0], inputs[1])
-            total_loss.append(eval_loss["interaction_loss"].item())
-            print("....")
-            print(gold_lab)
-            pred_lab_soft = F.softmax(pred_lab, dim=1)
-            pred_lab = pred_lab.sigmoid()
-            print(pred_lab)
-            print(pred_lab_soft)
-            pred_lab = torch.round(pred_lab)
-            print(pred_lab)
-            for pred, gold in zip(pred_lab, gold_lab):
-                if torch.equal(pred, gold):
-                    all_correct += 1
-                total_all += 1
-                for pr_e, g_e in zip(pred, gold):
-                    if torch.equal(pr_e, g_e):
-                        idx_correct += 1
-                    total_idx += 1
-            _, predicted = torch.max(pred_lab_soft, 1)
-            _, gold = torch.max(gold_lab, 1)
-            print(predicted)
-            print(gold)
-            all_correct_soft += (predicted == gold).sum().item()
+            targets = inputs[1]
+            results = net(inputs[0])
 
-        results = {"eval_loss": sum(total_loss) / len(self.test_loader),
-                   "all_correct": all_correct / total_all,
-                   "all_correct_soft": all_correct_soft / total_all,
-                   "idx_correct": idx_correct / total_idx}
+            gold_boxes = targets[0]["boxes"]
+            img_size = targets[0]["size"]
+            gold_boxes = self.recover_boxes(gold_boxes, img_size)
+            gold_boxes_ids = targets[0]["object"]
+            gold_labels = targets[0]["labels"]
+
+
+            pred_boxes = results["pred_boxes"][0]
+            pred_boxes_ids = results["pred_boxes_label"][0]
+            pred_labels = results["ffn_preds"][0]
+            pred_labels = F.softmax(pred_labels, dim=1)
+
+            for g_box, g_id, g_label in zip(gold_boxes, gold_boxes_ids, gold_labels):
+                all_all_pred += 1
+
+                possible_p_idx = []
+                for p_idx, (p_box, p_id, p_label) in enumerate(zip(pred_boxes, pred_boxes_ids, pred_labels)):
+                    box_iou = get_iou({"x1": p_box[0], "x2": p_box[2], "y1": p_box[1], "y2": p_box[3]},
+                                           {"x1": g_box[0], "x2": g_box[2], "y1": g_box[1],
+                                            "y2": g_box[3]})
+                    if box_iou > 0.4 and p_id == g_id:
+                        possible_p_idx.append(p_idx)
+
+                if len(possible_p_idx) == 1:
+                    found_id += 1
+                    _, gold = torch.max(g_label, 0)
+                    _, predicted = torch.max(pred_labels[possible_p_idx[0]], 0)
+                    if gold.item() == predicted.item():
+                        correct_id += 1
+
+        print(correct_id)
+        print(found_id)
+        print(all_all_pred)
+        print(correct_id / found_id)
+        print(correct_id / all_all_pred)
+        results = {}
         return results
 
 
