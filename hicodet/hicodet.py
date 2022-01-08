@@ -546,11 +546,6 @@ class HICODet(ImageDataset):
             merged_hoi_list = []
             for hbox, obox, objidx, verbidx in zip(anno["boxes_h"], anno["boxes_o"], anno["object"], anno["verb"]):
                 found = False
-                print("....")
-                print(hbox)
-                print(obox)
-                print(objidx)
-                print(verbidx)
                 objstr = self._hico_object[objidx]
                 newobjid = self.label2id[objstr.replace("_", " ")]
 
