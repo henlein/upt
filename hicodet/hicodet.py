@@ -334,7 +334,7 @@ class HICODet(ImageDataset):
         self._verbs = f['verbs']
 
         self.hoi_annotation = {}  # {obj#verb: T/G/-} (string)
-        with open(os.path.join(os.path.dirname(self._anno_file), "HOI.txt")) as file:
+        with open("/home/external_homes/henlein/HicoDetDataset/HOI.txt") as file:
             for line in file:
                 splitline = line.split()
                 if len(splitline) > 3:
@@ -546,7 +546,11 @@ class HICODet(ImageDataset):
             merged_hoi_list = []
             for hbox, obox, objidx, verbidx in zip(anno["boxes_h"], anno["boxes_o"], anno["object"], anno["verb"]):
                 found = False
-
+                print("....")
+                print(hbox)
+                print(obox)
+                print(objidx)
+                print(verbidx)
                 objstr = self._hico_object[objidx]
                 newobjid = self.label2id[objstr.replace("_", " ")]
 
