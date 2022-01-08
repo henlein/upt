@@ -87,14 +87,14 @@ def create_object_filter(merged_data):
         train_dict["filenames"] = train_anno
         test_dict["filenames"] = test_anno
 
-        train_dict["objects"] = train_anno
-        test_dict["objects"] = test_anno
+        train_dict["objects"] = merged_data["objects"]
+        test_dict["objects"] = merged_data["objects"]
 
-        train_dict["verbs"] = train_anno
-        test_dict["verbs"] = test_anno
+        train_dict["verbs"] = merged_data["verbs"]
+        test_dict["verbs"] = merged_data["verbs"]
 
-        train_dict["correspondence"] = train_anno
-        test_dict["correspondence"] = test_anno
+        train_dict["correspondence"] = merged_data["correspondence"]
+        test_dict["correspondence"] = merged_data["correspondence"]
 
         test_anno, train_anno = split_list(merged_data["size"], obj_docs)
         train_dict["size"] = train_anno
@@ -112,7 +112,7 @@ def create_object_filter(merged_data):
         test_dict["empty"] = test_empty
 
         train_empty = []
-        for idx, val in enumerate(test_anno):
+        for idx, val in enumerate(train_anno):
             if val == 1:
                 train_empty.append(idx)
         train_dict["empty"] = train_empty
@@ -143,14 +143,14 @@ def create_verb_filter(merged_data):
         train_dict["filenames"] = train_anno
         test_dict["filenames"] = test_anno
 
-        train_dict["objects"] = train_anno
-        test_dict["objects"] = test_anno
+        train_dict["objects"] = merged_data["objects"]
+        test_dict["objects"] = merged_data["objects"]
 
-        train_dict["verbs"] = train_anno
-        test_dict["verbs"] = test_anno
+        train_dict["verbs"] = merged_data["verbs"]
+        test_dict["verbs"] = merged_data["verbs"]
 
-        train_dict["correspondence"] = train_anno
-        test_dict["correspondence"] = test_anno
+        train_dict["correspondence"] = merged_data["correspondence"]
+        test_dict["correspondence"] = merged_data["correspondence"]
 
         test_anno, train_anno = split_list(merged_data["size"], obj_docs)
         train_dict["size"] = train_anno
@@ -168,7 +168,7 @@ def create_verb_filter(merged_data):
         test_dict["empty"] = test_empty
 
         train_empty = []
-        for idx, val in enumerate(test_anno):
+        for idx, val in enumerate(train_anno):
             if val == 1:
                 train_empty.append(idx)
         train_dict["empty"] = train_empty
@@ -212,14 +212,14 @@ def create_hoi_filter(merged_data):
         train_dict["filenames"] = train_anno
         test_dict["filenames"] = test_anno
 
-        train_dict["objects"] = train_anno
-        test_dict["objects"] = test_anno
+        train_dict["objects"] = merged_data["objects"]
+        test_dict["objects"] = merged_data["objects"]
 
-        train_dict["verbs"] = train_anno
-        test_dict["verbs"] = test_anno
+        train_dict["verbs"] = merged_data["verbs"]
+        test_dict["verbs"] = merged_data["verbs"]
 
-        train_dict["correspondence"] = train_anno
-        test_dict["correspondence"] = test_anno
+        train_dict["correspondence"] = merged_data["correspondence"]
+        test_dict["correspondence"] = merged_data["correspondence"]
 
         test_anno, train_anno = split_list(merged_data["size"], obj_docs)
         train_dict["size"] = train_anno
@@ -237,7 +237,7 @@ def create_hoi_filter(merged_data):
         test_dict["empty"] = test_empty
 
         train_empty = []
-        for idx, val in enumerate(test_anno):
+        for idx, val in enumerate(train_anno):
             if val == 1:
                 train_empty.append(idx)
         train_dict["empty"] = train_empty
@@ -263,6 +263,6 @@ merged_json = merge_train_test(train_data, test_data)
 
 #create_object_filter(merged_json)
 
-#create_verb_filter(merged_json)
+create_verb_filter(merged_json)
 
-create_hoi_filter(merged_json)
+#create_hoi_filter(merged_json)
