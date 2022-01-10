@@ -79,14 +79,16 @@ class DataFactory(Dataset):
                 self.dataset = HICODet(
                     root=os.path.join(data_root, 'hico_20160224_det/images', "merged2015"),
                     #anno_file=os.path.join(data_root, 'hicodet_obj_split',  'bicycle_train_2384.json'),
-                    anno_file=os.path.join(data_root, 'hicodet_verb_split', 'drive_train_1432.json'),
+                    #anno_file=os.path.join(data_root, 'hicodet_verb_split', 'drive_train_1432.json'),
+                    anno_file=os.path.join(data_root, 'hicodet_hoi_split', 'book_read_train_1827.json'),
                     target_transform=pocket.ops.ToTensor(input_format='dict')
                 )
             elif partition == "test2015":
                 self.dataset = HICODet(
                     root = os.path.join(data_root, 'hico_20160224_det/images', "merged2015"),
                     #anno_file = os.path.join(data_root, 'hicodet_obj_split', 'bicycle_test_2384.json'),
-                    anno_file=os.path.join(data_root, 'hicodet_verb_split', 'drive_test_1432.json'),
+                    #anno_file=os.path.join(data_root, 'hicodet_verb_split', 'drive_test_1432.json'),
+                    anno_file=os.path.join(data_root, 'hicodet_hoi_split', 'book_read_test_1827.json'),
                     target_transform = pocket.ops.ToTensor(input_format='dict')
                 )
             else:
