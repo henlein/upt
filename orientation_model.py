@@ -44,11 +44,11 @@ class OrientationModel(nn.Module):
             return_weights=True
         )
 
-        #print("::::::::::::::::::::::::::::::::::::::")
-        #pretrained_coop = self.upt.interaction_head.coop_layer.state_dict()
-        #print(pretrained_coop)
-        #self.coop_layer.load_state_dict(pretrained_coop)
-        #print("Loading worked :)")
+        print("::::::::::::::::::::::::::::::::::::::")
+        pretrained_coop = self.upt.interaction_head.coop_layer.state_dict()
+        print(pretrained_coop)
+        self.coop_layer.load_state_dict(pretrained_coop)
+        print("Loading worked :)")
 
         if self.input_type < 2:
             self.ori_fc_1 = nn.Linear(256, args.ff1_hidden)

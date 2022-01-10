@@ -2,21 +2,21 @@ program: main_orientation.py
 method: bayes
 name: upt-ori-v1
 metric:
-  name: all_correct_soft
+  name: found_correct_soft
   goal: maximize
 parameters:
   clip-max-norm:
     min: 0.05
     max: 0.2
   lr-head:
-    min: 0.00005
-    max: 0.0005
+    min: 0.00001
+    max: 0.0002
   weight-decay:
-    min: 0.00005
+    min: 0.00001
     max: 0.0005
   lr-drop:
-    min: 5
-    max: 20
+    min: 1
+    max: 100
   ff1-hidden:
     min: 64
     max: 512

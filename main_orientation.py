@@ -13,7 +13,7 @@ import torch
 import random
 import warnings
 import argparse
-#import wandb
+import wandb
 from tqdm import tqdm
 import numpy as np
 import torch.distributed as dist
@@ -70,8 +70,8 @@ def main(rank, args):
     )
     print("::::::::::::")
     print(rank)
-    #.init(project="UPT-ORI Test", config=args)
-    #args = wandb.config
+    wandb.init(project="ori_up_test", config=args)
+    args = wandb.config
     print(args)
 
     # Fix seed
@@ -83,11 +83,13 @@ def main(rank, args):
     torch.cuda.set_device(rank)
     train_dataset = HICODetOri(
         root=os.path.join(args.data_root, 'hico_20160224_det/images', "train2015"),
-        anno_ori_file=os.path.join(args.data_root, "orientation_annotation", "ALL_train.json")
+        anno_ori_file=os.path.join(args.data_root, "orientation_annotation", "ALL_train.json"),
+        #anno_ori_file = os.path.join(args.data_root, "orientation_annotation", "knife_train.json")
     )
     test_dataset = HICODetOri(
         root=os.path.join(args.data_root, 'hico_20160224_det/images', "train2015"),
         anno_ori_file=os.path.join(args.data_root, "orientation_annotation", "ALL_test.json")
+        #anno_ori_file = os.path.join(args.data_root, "orientation_annotation", "knife_test.json")
     )
 
     trainset = DataFactoryOri(train_dataset, "train", True)
@@ -117,19 +119,19 @@ def main(rank, args):
     label_weights = train_dataset.dataset_weights
     print(label_weights)
     orimodel = OrientationModel(args, label_weights)
-    #if rank == 0:
-    #    wandb.watch(orimodel, log_freq=args.print_interval)
+    if rank == 0:
+        wandb.watch(orimodel, log_freq=args.print_interval)
 
     print("CustomisedDLE")
-    #print(args.output_dir + "/" + wandb.run.name + "/")
+    print(args.output_dir + "/" + wandb.run.name + "/")
     engine = OrientationDLE(
         orimodel, train_loader, test_loader,
         max_norm=args.clip_max_norm,
         num_classes=args.num_classes,
         print_interval=args.print_interval,
         #find_unused_parameters=True,
-        #cache_dir=args.output_dir+ "/" + wandb.run.name + "/"
-        cache_dir = args.output_dir + "/test/"
+        cache_dir=args.output_dir+ "/" + wandb.run.name + "/"
+        #cache_dir = args.output_dir + "/test/"
     )
 
     params = []
@@ -147,7 +149,6 @@ def main(rank, args):
     engine.update_state_key(optimizer=optim, lr_scheduler=lr_scheduler)
     engine.save_checkpoint()
     engine(args.epochs)
-    #wandb.finish(0)
 
 
 class OrientationDLE(DistributedLearningEngine):
@@ -164,8 +165,8 @@ class OrientationDLE(DistributedLearningEngine):
         if loss_dict['interaction_loss'].isnan():
             raise ValueError(f"The HOI loss is NaN for rank {self._rank}")
 
-        #if self._rank == 0:
-        #    wandb.log(loss_dict)
+        if self._rank == 0:
+            wandb.log(loss_dict)
         self._state.loss = sum(loss for loss in loss_dict.values())
         self._state.optimizer.zero_grad(set_to_none=True)
         self._state.loss.backward()
@@ -178,14 +179,14 @@ class OrientationDLE(DistributedLearningEngine):
             self.save_checkpoint()
             eval_results = self.test_orientation()
             print(eval_results)
-            #wandb.log(eval_results)
+            wandb.log(eval_results)
 
         if self._state.lr_scheduler is not None:
             self._state.lr_scheduler.step()
 
-    #def _on_end(self):
-        #if self._rank == 0:
-            #wandb.finish(0)
+    def _on_end(self):
+        if self._rank == 0:
+            wandb.finish(0)
         #if dist.is_initialized():
         #    dist.j
 
@@ -202,9 +203,13 @@ class OrientationDLE(DistributedLearningEngine):
         net.eval()
 
         correct_id = 0
+        correct_baseline_id = 0
+        correct_baseline_wo = 0
         found_id = 0
         all_all_pred = 0
 
+        baseline_map = self._train_loader.dataset.dataset.map_up
+        print(baseline_map)
         for batch_idx, batch in tqdm(enumerate(self.test_loader), total=len(self.test_loader)):
             inputs = pocket.ops.relocate_to_cuda(batch)
             targets = inputs[1]
@@ -223,6 +228,8 @@ class OrientationDLE(DistributedLearningEngine):
             pred_labels = F.softmax(pred_labels, dim=1)
 
             for g_box, g_id, g_label in zip(gold_boxes, gold_boxes_ids, gold_labels):
+                #if g_id.item() != 49:
+                #    continue
                 all_all_pred += 1
 
                 possible_p_idx = []
@@ -240,12 +247,30 @@ class OrientationDLE(DistributedLearningEngine):
                     if gold.item() == predicted.item():
                         correct_id += 1
 
-        print(correct_id)
-        print(found_id)
-        print(all_all_pred)
-        print(correct_id / found_id)
-        print(correct_id / all_all_pred)
-        results = {}
+                    a = possible_p_idx[0]
+                    b = pred_boxes_ids[a]
+                    if b.item() in baseline_map:
+                        c = baseline_map[b.item()]
+                        d = torch.tensor(list(c))
+                        _, predicted_baseline = torch.max(d, 0)
+                        if gold.item() == predicted_baseline.item():
+                            correct_baseline_id += 1
+
+                    c = baseline_map["all"]
+                    d = torch.tensor(list(c))
+                    _, predicted_baseline = torch.max(d, 0)
+                    if gold.item() == predicted_baseline.item():
+                        correct_baseline_wo += 1
+
+        #print(correct_id)
+        #print(found_id)
+        #print(correct_baseline_id)
+        #print(all_all_pred)
+        #print(correct_id / found_id)
+        #print(correct_baseline_id / found_id)
+        #print(correct_id / all_all_pred)
+        results = {"found_correct_soft": correct_id / found_id, "found_correct_baseline": correct_baseline_id / found_id,
+                   "all_correct_soft": correct_id / all_all_pred, "found_correct_baseline_wo": correct_baseline_wo / found_id}
         return results
 
 
@@ -311,4 +336,5 @@ if __name__ == '__main__':
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = args.port
 
-    mp.spawn(main, nprocs=1, args=(args,))
+    main(args=args, rank=0)
+    #mp.spawn(main, nprocs=1, args=(args,))

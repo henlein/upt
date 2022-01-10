@@ -3,7 +3,7 @@ import os.path
 import random
 random.seed(123)
 
-anju_anno_file = "C:/Users/Alexander/Downloads/via234_780 items_Dec 23.json"
+anju_anno_file = "D:/Corpora/HICO-DET/via234_1000 items_jan 8.json"
 split_folder = "D:/Corpora/HICO-DET/orientation_annotation"
 
 cat_to_image_map = {}
@@ -24,7 +24,7 @@ with open(anju_anno_file) as json_file:
 
     print(keys)
     random.shuffle(keys)
-    train_keys = keys[:650]
+    train_keys = keys[:800]
     train_json = {}
     for key in train_keys:
         train_json[key] = data[key]
@@ -32,7 +32,7 @@ with open(anju_anno_file) as json_file:
     with open(os.path.join(split_folder, "ALL_train.json"), 'w') as f:
         json.dump(train_save_json, f)
 
-    test_keys = keys[650:]
+    test_keys = keys[800:]
     test_json = {}
     for key in test_keys:
         test_json[key] = data[key]

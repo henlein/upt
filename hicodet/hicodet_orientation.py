@@ -217,6 +217,10 @@ class HICODetOri(ImageDataset):
             "zebra": 24
         }
 
+
+        check_most_frequent_front = {}
+        check_most_frequent_up = {}
+
         count_regions = 0
         count_labels = torch.zeros(6)
         zero_label_vec = torch.zeros(6)
@@ -245,16 +249,25 @@ class HICODetOri(ImageDataset):
                     exit()
                 if name not in self.label2id:
                     continue
-                if all(v == 0 for v in front_vec):
-                    continue
+                #if all(v == 0 for v in front_vec):
+                #    continue
 
-
+                obj_name = self.label2id[name]
                 bboxes.append(bbox)
                 fronts.append(front_vec)
                 ups.append(up_vec)
-                names.append(self.label2id[name])
-                #labels.append(front_vec)# + up_vec)
+                names.append(obj_name)
                 labels.append(up_vec)
+
+                if obj_name in check_most_frequent_front:
+                    check_most_frequent_front[obj_name].append(front_vec)
+                else:
+                    check_most_frequent_front[obj_name] = [front_vec]
+
+                if obj_name in check_most_frequent_up:
+                    check_most_frequent_up[obj_name].append(up_vec)
+                else:
+                    check_most_frequent_up[obj_name] = [up_vec]
 
             if len(bboxes) > 0:
                 anno_dict = {"filename": anno["filename"], "boxes": torch.tensor(bboxes), "front": fronts, "up": ups, "object": torch.tensor(names), "labels": torch.FloatTensor(labels)}
@@ -267,6 +280,23 @@ class HICODetOri(ImageDataset):
         print(count_labels)
         self.dataset_weights = self.calculate_pos_weights(count_labels, count_regions)
         print(self.dataset_weights)
+
+        self.map_front = {}
+        for_all_front = []
+        for key, values in check_most_frequent_front.items():
+            self.map_front[key] = max(values, key=values.count)
+            for_all_front += values
+        self.map_front["all"] = max(for_all_front, key=for_all_front.count)
+
+        self.map_up = {}
+        for_all_up = []
+        for key, values in check_most_frequent_up.items():
+            self.map_up[key] = max(values, key=values.count)
+            for_all_up += values
+        self.map_up["all"] = max(for_all_up, key=for_all_up.count)
+
+
+
 
 class DataFactoryOri(Dataset):
     def __init__(self, dataset, name, train: bool):

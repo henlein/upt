@@ -92,7 +92,7 @@ class DataFactory(Dataset):
                     #anno_file=os.path.join(data_root, 'hicodet_obj_split', 'bicycle_test_2384.json'),
                     #anno_file=os.path.join(data_root, 'hicodet_verb_split', 'drive_test_1432.json'),
                     #anno_file=os.path.join(data_root, 'hicodet_hoi_split', 'book_read_test_1827.json'),
-                    target_transform = pocket.ops.ToTensor(input_format='dict')
+                    target_transform=pocket.ops.ToTensor(input_format='dict')
                 )
             else:
                 print("ERROR2!!!")
