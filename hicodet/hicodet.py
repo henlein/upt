@@ -550,6 +550,9 @@ class HICODet(ImageDataset):
                 objstr = self._hico_object[objidx]
                 newobjid = self.label2id[objstr.replace("_", " ")]
 
+                if newobjid != 2:
+                    continue
+
                 verbstr = self._verbs[verbidx]
                 if (objstr.replace(" ", "_"), verbstr) not in self.hoi_annotation:
                     continue

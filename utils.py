@@ -75,11 +75,28 @@ class DataFactory(Dataset):
         if name == 'hicodet':
             assert partition in ['train2015', 'test2015'], \
                 "Unknown HICO-DET partition " + partition
-            self.dataset = HICODet(
-                root=os.path.join(data_root, 'hico_20160224_det/images', partition),
-                anno_file=os.path.join(data_root, 'instances_{}.json'.format(partition)),
-                target_transform=pocket.ops.ToTensor(input_format='dict')
-            )
+            if partition == "train2015":
+                print("Use Train")
+                self.dataset = HICODet(
+                    root=os.path.join(data_root, 'hico_20160224_det/images', "merged2015"),
+                    anno_file=os.path.join(data_root, 'hicodet_obj_split',  'bicycle_train_2384.json'),
+                    #anno_file=os.path.join(data_root, 'hicodet_verb_split', 'drive_train_1432.json'),
+                    #anno_file=os.path.join(data_root, 'hicodet_hoi_split', 'book_read_train_1827.json'),
+                    target_transform=pocket.ops.ToTensor(input_format='dict')
+                )
+            elif partition == "test2015":
+                print("Use Test")
+                self.dataset = HICODet(
+                    root=os.path.join(data_root, 'hico_20160224_det/images', "merged2015"),
+                    anno_file=os.path.join(data_root, 'instances_test2015.json'),
+                    #anno_file=os.path.join(data_root, 'hicodet_obj_split', 'bicycle_test_2384.json'),
+                    #anno_file=os.path.join(data_root, 'hicodet_verb_split', 'drive_test_1432.json'),
+                    #anno_file=os.path.join(data_root, 'hicodet_hoi_split', 'book_read_test_1827.json'),
+                    target_transform = pocket.ops.ToTensor(input_format='dict')
+                )
+            else:
+                print("ERROR2!!!")
+                exit(0)
         else:
             print("ERROR!!!")
             exit(0)
@@ -177,59 +194,44 @@ class CustomisedDLE(DistributedLearningEngine):
         all_wrong = []
         missed = []
 
+        debug_dict = {}
+
         dataset = dataloader.dataset.dataset
         associate = BoxPairAssociation(min_iou=0.5)
         conversion = torch.from_numpy(np.asarray(
             dataset.object_n_verb_to_interaction, dtype=float
         ))
 
-        #test_anno = [0 for _ in range(len(dataset.anno_interaction))]
-        #test_anno[30] = 2
         meter = DetectionAPMeter(
             91 * 2, nproc=1,
-            #num_gt=test_anno,
             num_gt=dataset.anno_interaction,
             algorithm='11P'
         )
 
-        """
-        f = open("results_test.json", "w")
-        filterdict = set()
-        anno = open("../HicoDetDataset/via234_780 items_Dec 23.json", "r")
-        anno_data = json.load(anno)
-        for img_key in anno_data["_via_img_metadata"].keys():
-            #print(img_key)
-            split_key = img_key.split("_")[2]
-            split_key = split_key.split(".")[0]
-            filterdict.add(int(split_key))
-        #print(filterdict)
-        """
-
         for batch_idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
-            #if batch_idx < 880:
-            #    continue
             target = batch[-1][0]
-            #if target["fileid"].item() not in filterdict:
-            #    continue
-            #print(target["fileid"].item())
             inputs = pocket.ops.relocate_to_cuda(batch[0])
-
             output = net(inputs)
+
+            all_correct.append(0)
+            verb_correct_obj_wrong.append(0)
+            obj_correct_verb_wrong.append(0)
+            obj_wrong_verb_wrong.append(0)
+            all_wrong.append(0)
 
             # Skip images without detections
             if output is None or len(output) == 0:
+                missed.append(len(target["verb"]))
+                debug_dict[target["fileid"].item()] = (
+                all_correct[-1], verb_correct_obj_wrong[-1], obj_correct_verb_wrong[-1], obj_wrong_verb_wrong[-1],
+                all_wrong[-1], missed[-1])
+
                 continue
             # Batch size is fixed as 1 for inference
             assert len(output) == 1, f"Batch size is not 1 but {len(output)}."
             output = pocket.ops.relocate_to_cpu(output[0], ignore=True)
             output.pop("attn_maps")
 
-
-            listinputs = [x.tolist() for x in inputs]
-            dicttarget = {x: y.tolist() for x, y in target.items()}
-            dictoutput = {x: y.tolist() for x, y in output.items()}
-            #f.write(json.dumps({"target": dicttarget, "output": dictoutput}))
-            # Format detections
             boxes = output['boxes']
             boxes_h, boxes_o = boxes[output['pairing']].unbind(0)
             objects = output['objects']
@@ -237,22 +239,13 @@ class CustomisedDLE(DistributedLearningEngine):
             verbs = output['labels']
             interactions = conversion[objects, verbs]
             gt_bx_h = net.module.recover_boxes(target['boxes_h'], target['size'])
-            #print(gt_bx_h)
             gt_bx_o = net.module.recover_boxes(target['boxes_o'], target['size'])
-            #print(gt_bx_o)
             labels = torch.zeros_like(scores)
             unique_hoi = interactions.unique()
-            #print("=======================")
-            #print(target)
-            #print(unique_hoi)
-            #print(gt_bx_h)
-            #print(gt_bx_o)
+
             for hoi_idx in unique_hoi:
-                #print(".....")
                 gt_idx = torch.nonzero(target['hoi'] == hoi_idx).squeeze(1)
                 det_idx = torch.nonzero(interactions == hoi_idx).squeeze(1)
-                #print(gt_idx)
-                #print(det_idx)
                 if len(gt_idx):
                     labels[det_idx] = associate(
                         (gt_bx_h[gt_idx].view(-1, 4),
@@ -263,7 +256,6 @@ class CustomisedDLE(DistributedLearningEngine):
                     )
 
             meter.append(scores, interactions, labels)
-
 
 
             inx = np.array([i for i in range(len(boxes_h)) if i % 2 == 0])
@@ -278,6 +270,8 @@ class CustomisedDLE(DistributedLearningEngine):
             pre_verb = []
             pred_verb_score = []
             for hbox, obox, score, obj in zip(boxes_h_filter, boxes_o_filter, scores_reshape, objects_filter.reshape(-1, 1)):
+                if obj.item() != 2:
+                    continue
                 max_score, max_idx = torch.max(score, 0)
                 if max_score.item() > 0.1:
                     pred_hbox.append(hbox)
@@ -287,6 +281,11 @@ class CustomisedDLE(DistributedLearningEngine):
                     pred_verb_score.append(score)
 
             if len(pre_verb) == 0:
+                missed.append(len(target["verb"]))
+                debug_dict[target["fileid"].item()] = (
+                all_correct[-1], verb_correct_obj_wrong[-1], obj_correct_verb_wrong[-1], obj_wrong_verb_wrong[-1],
+                all_wrong[-1], missed[-1])
+                continue
                 max_score, max_idx = torch.max(scores, 0)
                 pred_hbox.append(boxes_h[max_idx])
                 pred_obox.append(boxes_o[max_idx])
@@ -300,7 +299,6 @@ class CustomisedDLE(DistributedLearningEngine):
             obj_wrong_verb_wrong.append(0)
             all_wrong.append(0)
             for hbox, obox, verb, obj in zip(pred_hbox, pred_obox, pre_verb, pred_obj):
-                #print(str(hbox) + " - " + str(obox) + " :" + str(obj) + " - " + str(verb))
                 found = False
                 for ghbox, gobox, gverb, gobj in zip(gt_bx_h, gt_bx_o, target["verb"], target["object"]):
                     hbox_overlap = get_iou({"x1": hbox[0].item(), "x2": hbox[2].item(), "y1": hbox[1].item(), "y2": hbox[3].item()},
@@ -325,9 +323,9 @@ class CustomisedDLE(DistributedLearningEngine):
                     all_wrong[-1] += 1
 
             missed.append(len(target["verb"]) - sum([all_correct[-1], verb_correct_obj_wrong[-1], obj_correct_verb_wrong[-1], obj_wrong_verb_wrong[-1]]))
-        #f.close()
+            debug_dict[target["fileid"].item()] = (all_correct[-1], verb_correct_obj_wrong[-1], obj_correct_verb_wrong[-1], obj_wrong_verb_wrong[-1], all_wrong[-1], missed[-1])
         return meter.eval(), {"all_correct": sum(all_correct), "verb_correct_obj_wrong": sum(verb_correct_obj_wrong), "obj_correct_verb_wrong": sum(obj_correct_verb_wrong),
-                              "obj_wrong_verb_wrong": sum(obj_wrong_verb_wrong), "all_wrong": sum(all_wrong), "missed": sum(missed)}
+                              "obj_wrong_verb_wrong": sum(obj_wrong_verb_wrong), "all_wrong": sum(all_wrong), "missed": sum(missed)}, debug_dict
 
 
     @torch.no_grad()

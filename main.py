@@ -10,6 +10,7 @@ Australian Centre for Robotic Vision
 
 import os
 import torch
+import json
 import random
 import warnings
 import argparse
@@ -25,8 +26,8 @@ warnings.filterwarnings("ignore")
 
 def main(rank, args):
     dist.init_process_group(
-        #backend="nccl",
-        backend="gloo",
+        backend="nccl",
+        #backend="gloo",
         init_method="env://",
         world_size=args.world_size,
         rank=rank
@@ -86,20 +87,26 @@ def main(rank, args):
     if args.eval:
         if args.dataset == 'vcoco':
             raise NotImplementedError(f"Evaluation on V-COCO has not been implemented.")
-        ap, my_dict = engine.test_hico(test_loader)
+        ap, my_dict, debug_dict = engine.test_hico(test_loader)
         # Fetch indices for rare and non-rare classes
         num_anno = torch.as_tensor(trainset.dataset.anno_interaction)
         rare = torch.nonzero(num_anno < 10).squeeze(1)
         non_rare = torch.nonzero(num_anno >= 10).squeeze(1)
         ap = ap.detach().cpu().numpy()
         ap[ap == 0] = np.nan
+
         print(
             f"The mAP is {np.nanmean(ap):.4f},"
             f" rare: {np.nanmean(ap[rare]):.4f},"
             f" none-rare: {np.nanmean(ap[non_rare]):.4f}"
         )
+
         print("========")
         print(my_dict)
+        print(ap)
+
+        with open('eval_debug.json', 'w') as f:
+            json.dump(debug_dict, f, indent=4)
         return
 
     for p in upt.detector.parameters():
