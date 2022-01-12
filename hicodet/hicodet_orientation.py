@@ -249,15 +249,15 @@ class HICODetOri(ImageDataset):
                     exit()
                 if name not in self.label2id:
                     continue
-                #if all(v == 0 for v in front_vec):
-                #    continue
+                if all(v == 0 for v in front_vec):
+                    continue
 
                 obj_name = self.label2id[name]
                 bboxes.append(bbox)
                 fronts.append(front_vec)
                 ups.append(up_vec)
                 names.append(obj_name)
-                labels.append(up_vec)
+                labels.append(front_vec)
 
                 if obj_name in check_most_frequent_front:
                     check_most_frequent_front[obj_name].append(front_vec)

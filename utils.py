@@ -79,9 +79,9 @@ class DataFactory(Dataset):
                 print("Use Train")
                 self.dataset = HICODet(
                     root=os.path.join(data_root, 'hico_20160224_det/images', "merged2015"),
-                    anno_file=os.path.join(data_root, 'hicodet_obj_split',  'bicycle_train_2384.json'),
+                    #anno_file=os.path.join(data_root, 'hicodet_obj_split',  'bicycle_train_2384.json'),
                     #anno_file=os.path.join(data_root, 'hicodet_verb_split', 'drive_train_1432.json'),
-                    #anno_file=os.path.join(data_root, 'hicodet_hoi_split', 'book_read_train_1827.json'),
+                    anno_file=os.path.join(data_root, 'hicodet_hoi_split', 'book_read_train_1827.json'),
                     target_transform=pocket.ops.ToTensor(input_format='dict')
                 )
             elif partition == "test2015":
@@ -270,7 +270,7 @@ class CustomisedDLE(DistributedLearningEngine):
             pre_verb = []
             pred_verb_score = []
             for hbox, obox, score, obj in zip(boxes_h_filter, boxes_o_filter, scores_reshape, objects_filter.reshape(-1, 1)):
-                if obj.item() != 2:
+                if obj.item() not in [9, 6, 3, 7, 8]:
                     continue
                 max_score, max_idx = torch.max(score, 0)
                 if max_score.item() > 0.1:

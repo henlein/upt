@@ -70,7 +70,7 @@ def main(rank, args):
     )
     print("::::::::::::")
     print(rank)
-    wandb.init(project="ori_up_test", config=args)
+    wandb.init(project="ori_front_test", config=args)
     args = wandb.config
     print(args)
 
@@ -208,7 +208,7 @@ class OrientationDLE(DistributedLearningEngine):
         found_id = 0
         all_all_pred = 0
 
-        baseline_map = self._train_loader.dataset.dataset.map_up
+        baseline_map = self._train_loader.dataset.dataset.map_front
         print(baseline_map)
         for batch_idx, batch in tqdm(enumerate(self.test_loader), total=len(self.test_loader)):
             inputs = pocket.ops.relocate_to_cuda(batch)

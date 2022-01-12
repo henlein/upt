@@ -1,6 +1,6 @@
 program: main_orientation.py
 method: bayes
-name: upt-ori-v1
+name: upt-ori-front-v1
 metric:
   name: found_correct_soft
   goal: maximize

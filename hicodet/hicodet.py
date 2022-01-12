@@ -550,7 +550,7 @@ class HICODet(ImageDataset):
                 objstr = self._hico_object[objidx]
                 newobjid = self.label2id[objstr.replace("_", " ")]
 
-                if newobjid != 2:
+                if newobjid not in [9, 6, 3, 7, 8]:
                     continue
 
                 verbstr = self._verbs[verbidx]
