@@ -201,23 +201,27 @@ class UPT(nn.Module):
     def postprocessing(self, region_props, bh, bo, logits, prior, objects, attn_maps, image_sizes, unary_tokens, pairwise_tokens, box_pair_spatial):
         n = [len(b) for b in bh]
         logits = logits.split(n)
+        pairwise_tokens = pairwise_tokens.split(n)
 
         detections = []
         for rp, h, o, lg, pr, obj, attn, size, ut, pt, bps in zip(
-            region_props, bh, bo, logits, prior, objects, attn_maps, image_sizes, unary_tokens, pairwise_tokens, box_pair_spatial
-        ):
+            region_props, bh, bo, logits, prior, objects, attn_maps, image_sizes, unary_tokens, pairwise_tokens, box_pair_spatial):
+            print("---")
+            print(lg.size())
+
             pr = pr.prod(0)
             x, y = torch.nonzero(pr).unbind(1)
             scores = torch.sigmoid(lg[x, y])
+
             detections.append(dict(
                 boxes=rp["boxes"], boxes_scores=rp["scores"], boxes_hidden_states=rp["hidden_states"], boxes_labels=rp["labels"],
-                unary_tokens=ut, pairwise_tokens=pt,
+                unary_tokens=ut, pairwise_tokens=pt[x],
                 pairing=torch.stack([h[x], o[x]]),
                 scores=scores * pr[x, y], labels=y,
                 objects=obj[x], attn_maps=attn, size=size, prior=pr,
                 box_pair_spatial=bps
             ))
-
+        #exit()
         return detections
 
     def forward(self, images: List[Tensor], targets: Optional[List[dict]] = None) -> List[dict]:
@@ -275,8 +279,14 @@ class UPT(nn.Module):
         logits, prior, bh, bo, objects, attn_maps, unary_tokens, pairwise_tokens, box_pair_spatial = self.interaction_head(
             src, image_sizes, region_props
         )
-
+        print("....")
+        print(pairwise_tokens)
+        print(pairwise_tokens.size())
+        print(logits.size())
+        #print("....")
         boxes = [r['boxes'] for r in region_props]
+
+        return dict(boxes=boxes, bh=bh, bo=bo, logits=logits, prior=prior, pairwise_tokens=pairwise_tokens)
 
         if self.training:
             interaction_loss = self.compute_interaction_loss(boxes, bh, bo, logits, prior, targets)

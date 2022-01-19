@@ -68,9 +68,8 @@ def main(rank, args):
         world_size=1,
         rank=rank
     )
-    print("::::::::::::")
-    print(rank)
-    wandb.init(project="ori_front_test", config=args)
+
+    wandb.init(project="ori_front_rel_test", config=args, mode="disabled")
     args = wandb.config
     print(args)
 
@@ -203,13 +202,9 @@ class OrientationDLE(DistributedLearningEngine):
         net.eval()
 
         correct_id = 0
-        correct_baseline_id = 0
-        correct_baseline_wo = 0
         found_id = 0
         all_all_pred = 0
 
-        baseline_map = self._train_loader.dataset.dataset.map_front
-        print(baseline_map)
         for batch_idx, batch in tqdm(enumerate(self.test_loader), total=len(self.test_loader)):
             inputs = pocket.ops.relocate_to_cuda(batch)
             targets = inputs[1]
@@ -247,30 +242,8 @@ class OrientationDLE(DistributedLearningEngine):
                     if gold.item() == predicted.item():
                         correct_id += 1
 
-                    a = possible_p_idx[0]
-                    b = pred_boxes_ids[a]
-                    if b.item() in baseline_map:
-                        c = baseline_map[b.item()]
-                        d = torch.tensor(list(c))
-                        _, predicted_baseline = torch.max(d, 0)
-                        if gold.item() == predicted_baseline.item():
-                            correct_baseline_id += 1
 
-                    c = baseline_map["all"]
-                    d = torch.tensor(list(c))
-                    _, predicted_baseline = torch.max(d, 0)
-                    if gold.item() == predicted_baseline.item():
-                        correct_baseline_wo += 1
-
-        #print(correct_id)
-        #print(found_id)
-        #print(correct_baseline_id)
-        #print(all_all_pred)
-        #print(correct_id / found_id)
-        #print(correct_baseline_id / found_id)
-        #print(correct_id / all_all_pred)
-        results = {"found_correct_soft": correct_id / found_id, "found_correct_baseline": correct_baseline_id / found_id,
-                   "all_correct_soft": correct_id / all_all_pred, "found_correct_baseline_wo": correct_baseline_wo / found_id}
+        results = {"found_correct_soft": correct_id / found_id, "all_correct_soft": correct_id / all_all_pred}
         return results
 
 

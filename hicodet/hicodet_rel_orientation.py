@@ -31,9 +31,9 @@ class HICODetOriSubset(DataSubset):
         return self._image_sizes[self._idx[self.pool[idx]]]
 
 
-class HICODetOri(ImageDataset):
+class HICODetOriRel(ImageDataset):
     def __init__(self, root: str, anno_ori_file: str):
-        super(HICODetOri, self).__init__(root)
+        super(HICODetOriRel, self).__init__(root)
         self.anno_ori_file = anno_ori_file
         with open(anno_ori_file, 'r') as f:
             anno_ori = json.load(f)
@@ -84,22 +84,22 @@ class HICODetOri(ImageDataset):
         return self._anno[idx]["filename"]
 
     def _ori_dict_to_vec(self, ori_dict):
-        vector = [0, 0, 0, 0, 0, 0]
+        vector = [0, 0, 0]
         keys = ori_dict.keys()
         if "n/a" in keys or len(keys) == 0:
             return vector
         elif "+x" in keys:
             vector[0] = 1
         elif "-x" in keys:
-            vector[1] = 1
+            vector[0] = -1
         elif "+y" in keys:
-            vector[2] = 1
+            vector[1] = 1
         elif "-y" in keys:
-            vector[3] = 1
+            vector[1] = -1
         elif "+z" in keys:
-            vector[4] = 1
+            vector[2] = 1
         elif "-z" in keys:
-            vector[5] = 1
+            vector[2] = -1
         else:
             print(ori_dict)
             print("!!!!!!!!!!!!!!!!!")
@@ -224,12 +224,14 @@ class HICODetOri(ImageDataset):
         count_labels = torch.zeros(6)
         zero_label_vec = torch.zeros(6)
         for anno_idx, (anno_key, anno) in enumerate(f["_via_img_metadata"].items()):
+            #print(anno_idx)
             bboxes = []
             fronts = []
             ups = []
             names = []
             labels = []
             for region in anno["regions"]:
+                #print(region)
                 bbox = [region["shape_attributes"]["x"], region["shape_attributes"]["y"],
                         region["shape_attributes"]["x"] + region["shape_attributes"]["width"],
                         region["shape_attributes"]["y"] + region["shape_attributes"]["height"]]
@@ -247,8 +249,6 @@ class HICODetOri(ImageDataset):
                     print("???????????????????")
                     exit()
                 if name not in self.label2id:
-                    continue
-                if all(v == 0 for v in front_vec):
                     continue
 
                 obj_name = self.label2id[name]
@@ -268,33 +268,53 @@ class HICODetOri(ImageDataset):
                 else:
                     check_most_frequent_up[obj_name] = [up_vec]
 
-            if len(bboxes) > 0:
-                anno_dict = {"filename": anno["filename"], "boxes": torch.tensor(bboxes), "front": fronts, "up": ups, "object": torch.tensor(names), "labels": torch.FloatTensor(labels)}
-                self._anno.append(anno_dict)
-                for lab in anno_dict["labels"]:
-                    count_labels += lab
-                    count_regions += 1
+            bboxes = [x for _, x in sorted(zip(names, bboxes))]
+            fronts = [x for _, x in sorted(zip(names, fronts))]
+            ups = [x for _, x in sorted(zip(names, ups))]
+            names = sorted(names)
 
-        print(count_regions)
-        print(count_labels)
-        self.dataset_weights = self.calculate_pos_weights(count_labels, count_regions)
-        print(self.dataset_weights)
+            if len(bboxes) > 1:
+                boxes_h = []
+                boxes_o = []
+                o_names = []
+                labels = []
+                for bix_idx, (hbox, hbox_l, hbox_front, hbox_up) in enumerate(zip(bboxes, names, fronts, ups)):
+                    #print(names)
+                    #print(hbox_l)
+                    if hbox_l == 1 and hbox_up != [0, 0, 0]:
+                        #print(hbox_up)
+                        for obox, obox_l, obox_front, obox_up in zip(bboxes[bix_idx+1:], names[bix_idx+1:], fronts[bix_idx+1:], ups[bix_idx+1:]):
+                            if obox_l > 1 and obox_up != [0, 0, 0]:
+                                boxes_h.append(hbox)
+                                boxes_o.append(obox)
+                                o_names.append(obox_l)
+                                labels.append(compute_rel_ori(hbox_front, hbox_up, obox_front, obox_up))
 
-        self.map_front = {}
-        for_all_front = []
-        for key, values in check_most_frequent_front.items():
-            self.map_front[key] = max(values, key=values.count)
-            for_all_front += values
-        self.map_front["all"] = max(for_all_front, key=for_all_front.count)
+                if len(boxes_h) > 0:
+                    anno_dict = {"filename": anno["filename"], "boxes_h": torch.tensor(boxes_h), "boxes_o": torch.tensor(boxes_o), "object": torch.tensor(o_names), "labels": torch.FloatTensor(labels)}
+                    self._anno.append(anno_dict)
 
-        self.map_up = {}
-        for_all_up = []
-        for key, values in check_most_frequent_up.items():
-            self.map_up[key] = max(values, key=values.count)
-            for_all_up += values
-        self.map_up["all"] = max(for_all_up, key=for_all_up.count)
+def compute_rel_ori(hbox_front, hbox_up, obox_front, obox_up):
+    # HEAVY TOTO!!!
 
+    if hbox_front == [0, 0, 0] or obox_front == [0, 0, 0]:
+        return [1, 0, 0] #Same Direction
+    if hbox_front == obox_front and hbox_up == obox_up:
+        return [1, 0, 0] #Same Direction
 
+    if hbox_up == obox_up:
+        h_front_idx = [x for x, n in enumerate(hbox_front) if n != 0][0]
+        if hbox_front[h_front_idx] != 0 and obox_front[h_front_idx] != 0:
+            return [0, 1, 0] #Angucken
+        else:
+            return [0, 0, 1] #Links/rechts/open/unten/anders gedreht ...
+
+    #print(".............")
+    #print(hbox_up)
+    #print(obox_up)
+    #print(hbox_front)
+    #print(obox_front)
+    return [0, 0, 1]
 
 
 class DataFactoryOri(Dataset):
@@ -341,10 +361,11 @@ class DataFactoryOri(Dataset):
 
 if __name__ == "__main__":
     os.chdir("..")
-    dataset = HICODetOri(
+    dataset = HICODetOriRel(
         root=os.path.join("D:/Corpora/HICO-DET", 'hico_20160224_det/images', "train2015"),
         anno_ori_file=os.path.join("D:/Corpora/HICO-DET", "via234_780 items_Dec 23.json")
     )
+
     #train_datset, test_dataset = dataset.split(0.8)
     #factory = DataFactoryOri(train_datset, "test", True)
     #print(factory[0])

@@ -607,7 +607,7 @@ if __name__ == "__main__":
         target_transform=pocket.ops.ToTensor(input_format='dict')
     )
     #print(dataset.filename(4))
-    data = dataset[1179]
+    data = dataset[0]
     print(data)
     #print(dataset.anno_interaction)
     #print(dataset.interactions)
