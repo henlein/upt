@@ -26,7 +26,7 @@ from pocket.utils import DetectionAPMeter, BoxPairAssociation
 import sys
 sys.path.append('detr')
 import datasets.transforms as T
-
+import wandb
 
 def get_iou(bb1, bb2):
     assert bb1['x1'] < bb1['x2']
@@ -164,6 +164,15 @@ class CustomisedDLE(DistributedLearningEngine):
         if self.max_norm > 0:
             torch.nn.utils.clip_grad_norm_(self._state.net.parameters(), self.max_norm)
         self._state.optimizer.step()
+
+    def _on_end_iteration(self):
+        # Print stats in the master process
+        if self._verbal and self._state.iteration % self._print_interval == 0:
+            running_loss = self._state.running_loss.mean()
+            if self._rank == 0:
+                wandb.log({"interaction_loss": running_loss})
+            self._print_statistics()
+
 
     @torch.no_grad()
     def test_hico(self, dataloader):

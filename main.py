@@ -14,6 +14,7 @@ import random
 import warnings
 import argparse
 import numpy as np
+import wandb
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.utils.data import DataLoader, DistributedSampler
@@ -24,9 +25,14 @@ from utils import custom_collate, CustomisedDLE, DataFactory
 warnings.filterwarnings("ignore")
 
 def main(rank, args):
+    if rank == 0:
+        wandb.init(project="upt-sweep", config=args)
+        print("1")
+        #args = wandb.config
+
     dist.init_process_group(
-        #backend="nccl",
-        backend="gloo",
+        backend="nccl",
+        #backend="gloo",
         init_method="env://",
         world_size=args.world_size,
         rank=rank
@@ -65,7 +71,12 @@ def main(rank, args):
     args.num_classes = 2
 
     upt = build_detector(args, object_to_target)
-
+    print("2")
+    if rank == 0:
+        print("3")
+        wandb.watch(upt, log_freq=args.print_interval)
+        print("4")
+    print("5")
     if os.path.exists(args.resume):
         print(f"=> Rank {rank}: continue from saved checkpoint {args.resume}")
         checkpoint = torch.load(args.resume, map_location='cpu')
@@ -74,13 +85,20 @@ def main(rank, args):
         print(f"=> Rank {rank}: start from a randomly initialised model")
 
     print("CustomisedDLE")
+
+    if rank == 0:
+        outdir = args.output_dir + "/" + wandb.run.name + "/"
+    else:
+        outdir = args.output_dir + "/rank1/"
+    print("5")
     engine = CustomisedDLE(
         upt, train_loader,
         max_norm=args.clip_max_norm,
         num_classes=args.num_classes,
         print_interval=args.print_interval,
-        find_unused_parameters=True,
-        cache_dir=args.output_dir
+        find_unused_parameters=False,
+        cache_dir=outdir
+        #cache_dir=args.output_dir
     )
 
 
@@ -126,13 +144,18 @@ def main(rank, args):
     # Override optimiser and learning rate scheduler
     engine.update_state_key(optimizer=optim, lr_scheduler=lr_scheduler)
     engine.save_checkpoint()
+    print("Start Engine")
     engine(args.epochs)
+
+    if rank == 0:
+        print("Finish WANDB1")
+        wandb.finish(0)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--lr-head', default=1e-4, type=float)
-    parser.add_argument('--batch-size', default=2, type=int)
+    parser.add_argument('--batch-size', default=8, type=int)
     parser.add_argument('--weight-decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=20, type=int)
     parser.add_argument('--lr-drop', default=10, type=int)
@@ -179,7 +202,7 @@ if __name__ == '__main__':
     parser.add_argument('--resume', default='', help='Resume from a model')
     parser.add_argument('--output-dir', default='checkpoints')
     parser.add_argument('--print-interval', default=500, type=int)
-    parser.add_argument('--world-size', default=1, type=int)
+    parser.add_argument('--world-size', default=2, type=int)
     parser.add_argument('--eval', action='store_true')
     parser.add_argument('--cache', action='store_true')
     parser.add_argument('--sanity', action='store_true')
@@ -192,5 +215,6 @@ if __name__ == '__main__':
 
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = args.port
-
+    print(args)
     mp.spawn(main, nprocs=args.world_size, args=(args,))
+
