@@ -13,7 +13,7 @@ class OrientationModel(nn.Module):
     def __init__(self, args, label_weights=None):
         super().__init__()
 
-        self.num_classes = 6
+        self.num_classes = 3
         self.fg_iou_thresh = args.fg_iou_thresh
         self.alpha = args.alpha
         self.gamma = args.gamma
@@ -51,48 +51,28 @@ class OrientationModel(nn.Module):
         self.coop_layer.load_state_dict(pretrained_coop)
         print("Loading worked :)")
         '''
-        if self.input_type < 2:
-            self.ori_fc_1 = nn.Linear(256, args.ff1_hidden)
-        else:
-            self.ori_fc_1 = nn.Linear(512, args.ff1_hidden)
+        self.ori_fc_1 = nn.Linear(1024, 512)
 
         self.relu1 = nn.ReLU()
-        self.ori_fc_2 = nn.Linear(args.ff1_hidden, self.num_classes)
+        self.ori_fc_2 = nn.Linear(512, self.num_classes)
 
 
     def train(self, mode=True):
         super(OrientationModel, self).train(mode)
         self.upt.eval()
 
-    def compute_orientation_loss(self, boxes, bh, bo, logits, prior, targets):
-        labels = torch.cat([
-            self.upt.associate_with_ground_truth(bx[h], bx[o], target)
-            for bx, h, o, target in zip(boxes, bh, bo, targets)
-        ])
-        print("labels", labels)
-        print("labels", labels.size())
-        exit()
-        prior = torch.cat(prior, dim=1).prod(0)
-        x, y = torch.nonzero(prior).unbind(1)
-        logits = logits[x, y]
-        prior = prior[x, y]
-        labels = labels[x, y]
-        n_p = len(torch.nonzero(labels))
-        if dist.is_initialized():
-            world_size = dist.get_world_size()
-            n_p = torch.as_tensor([n_p], device='cuda')
-            dist.barrier()
-            dist.all_reduce(n_p)
-            n_p = (n_p / world_size).item()
+    def associate_with_ground_truth(self, boxes_h, boxes_o, targets):
+        gt_bx_h = self.upt.recover_boxes(targets['boxes_h'], targets['size'])
+        gt_bx_o = self.upt.recover_boxes(targets['boxes_o'], targets['size'])
 
-        loss = binary_focal_loss_with_logits(
-            torch.log(
-                prior / (1 + torch.exp(-logits) - prior) + 1e-8
-            ), labels, reduction='sum',
-            alpha=self.alpha, gamma=self.gamma
-        )
+        x, y = torch.nonzero(torch.min(
+            box_iou(boxes_h, gt_bx_h),
+            box_iou(boxes_o, gt_bx_o)
+        ) >= self.fg_iou_thresh).unbind(1)
 
-        return loss / n_p
+        labels = targets['labels'][y]
+        return labels, x
+
 
     def forward(self, images: List[Tensor], targets: Optional[List[dict]] = None):
         image_sizes = torch.as_tensor([
@@ -107,15 +87,52 @@ class OrientationModel(nn.Module):
         bo = upt_feature["bo"]
         logits = upt_feature["logits"]
         prior = upt_feature["prior"]
+        objects = upt_feature["objects"]
         pairwise_tokens = upt_feature["pairwise_tokens"]
-        labels = torch.cat([
-            self.upt.associate_with_ground_truth(bx[h], bx[o], target)
-            for bx, h, o, target in zip(boxes, bh, bo, targets)
-        ])
+
+        if self.training:
+            filtered_labels = []
+            filtered_features = []
+            for bx, h, o, target in zip(boxes, bh, bo, targets):
+                lab, x = self.associate_with_ground_truth(bx[h], bx[o], target)
+                filtered_labels.append(lab)
+                filtered_feature = pairwise_tokens[x]
+                filtered_features.append(filtered_feature)
+            filtered_labels = torch.cat(filtered_labels)
+            filtered_features = torch.cat(filtered_features)
+        else:
+            filtered_features = pairwise_tokens
 
 
-        print("labels", labels)
-        print("labels", labels.size())
-        exit()
-        prior = torch.cat(prior, dim=1).prod(0)
-        x, y = torch.nonzero(prior).unbind(1)
+        out = self.ori_fc_1(filtered_features)
+        out = self.relu1(out)
+        out = self.ori_fc_2(out)
+
+        if not self.training:
+            results = {"h_box": boxes[0][bh[0]], "o_box": boxes[0][bo[0]], "pred_boxes_label": objects[0],
+                       "image_sizes": image_sizes[0], "ffn_preds": out}
+            return results
+
+        n_p = out.shape[0]
+        if dist.is_initialized():
+            world_size = dist.get_world_size()
+            n_p = torch.as_tensor([n_p], device='cuda')
+            dist.barrier()
+            dist.all_reduce(n_p)
+            n_p = (n_p / world_size).item()
+
+        if self.loss_type == 0:
+            interaction_loss = binary_cross_entropy_with_logits(out, filtered_labels,
+                                                                reduction='sum', weight=self.label_weights)
+        elif self.loss_type == 1:
+            interaction_loss = binary_focal_loss_with_logits(
+                torch.log(1 / torch.exp(-out) + 1e-8), filtered_labels, reduction='sum', alpha=self.alpha,
+                gamma=self.gamma)
+        else:
+            print("Not supportet Loss Type")
+            exit()
+
+        interaction_loss = interaction_loss / n_p
+
+        loss_dict = dict(interaction_loss=interaction_loss)
+        return loss_dict, (out, filtered_labels)

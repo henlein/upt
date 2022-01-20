@@ -50,7 +50,9 @@ class HICODetOriRel(ImageDataset):
         fileid = [x for x in anno["filename"] if x.isdigit()]
         fileid_int = int(''.join(fileid[4:]))
 
-        id_anno = {"fileid": torch.tensor(fileid_int), "boxes": anno["boxes"], "object": anno["object"], "labels": anno["labels"]}
+        id_anno = {"fileid": torch.tensor(fileid_int), "boxes_h": anno["boxes_h"], "boxes_o": anno["boxes_o"],
+                   "object": anno["object"], "labels": anno["labels"]}
+
         return self.load_image(os.path.join(self._root, self._anno[i]["filename"])), id_anno
 
     def __str__(self) -> str:
@@ -353,7 +355,8 @@ class DataFactoryOri(Dataset):
 
     def __getitem__(self, i):
         image, target = self.dataset[i]
-        target['boxes'][:, :2] -= 1
+        target['boxes_h'][:, :2] -= 1
+        target['boxes_o'][:, :2] -= 1
 
         image, target = self.transforms(image, target)
         return image, target
@@ -368,4 +371,4 @@ if __name__ == "__main__":
 
     #train_datset, test_dataset = dataset.split(0.8)
     #factory = DataFactoryOri(train_datset, "test", True)
-    #print(factory[0])
+    print(dataset[0])

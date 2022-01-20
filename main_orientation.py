@@ -20,7 +20,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, DistributedSampler
-from hicodet.hicodet_orientation import HICODetOri, DataFactoryOri
+from hicodet.hicodet_rel_orientation import HICODetOriRel, DataFactoryOri
 from util import box_ops
 from pocket.core import DistributedLearningEngine
 import pocket
@@ -80,12 +80,12 @@ def main(rank, args):
     random.seed(seed)
 
     torch.cuda.set_device(rank)
-    train_dataset = HICODetOri(
+    train_dataset = HICODetOriRel(
         root=os.path.join(args.data_root, 'hico_20160224_det/images', "train2015"),
         anno_ori_file=os.path.join(args.data_root, "orientation_annotation", "ALL_train.json"),
         #anno_ori_file = os.path.join(args.data_root, "orientation_annotation", "knife_train.json")
     )
-    test_dataset = HICODetOri(
+    test_dataset = HICODetOriRel(
         root=os.path.join(args.data_root, 'hico_20160224_det/images', "train2015"),
         anno_ori_file=os.path.join(args.data_root, "orientation_annotation", "ALL_test.json")
         #anno_ori_file = os.path.join(args.data_root, "orientation_annotation", "knife_test.json")
@@ -115,7 +115,8 @@ def main(rank, args):
     args.human_idx = 1
     args.num_classes = 2
 
-    label_weights = train_dataset.dataset_weights
+    #label_weights = train_dataset.dataset_weights
+    label_weights = None
     print(label_weights)
     orimodel = OrientationModel(args, label_weights)
     if rank == 0:
@@ -129,7 +130,7 @@ def main(rank, args):
         num_classes=args.num_classes,
         print_interval=args.print_interval,
         #find_unused_parameters=True,
-        cache_dir=args.output_dir+ "/" + wandb.run.name + "/"
+        cache_dir=args.output_dir + "/" + wandb.run.name + "/"
         #cache_dir = args.output_dir + "/test/"
     )
 
@@ -146,7 +147,7 @@ def main(rank, args):
     )
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optim, args.lr_drop)
     engine.update_state_key(optimizer=optim, lr_scheduler=lr_scheduler)
-    engine.save_checkpoint()
+    #engine.save_checkpoint()
     engine(args.epochs)
 
 
@@ -210,47 +211,74 @@ class OrientationDLE(DistributedLearningEngine):
             targets = inputs[1]
             results = net(inputs[0])
 
-            gold_boxes = targets[0]["boxes"]
+            gold_h_boxes = targets[0]["boxes_h"]
+            gold_o_boxes = targets[0]["boxes_o"]
+
             img_size = targets[0]["size"]
-            gold_boxes = self.recover_boxes(gold_boxes, img_size)
+            gold_h_boxes = self.recover_boxes(gold_h_boxes, img_size)
+            #print("gold_h_boxes", gold_h_boxes)
+            gold_o_boxes = self.recover_boxes(gold_o_boxes, img_size)
+            #print("gold_o_boxes", gold_o_boxes)
+
             gold_boxes_ids = targets[0]["object"]
+            #print("gold_boxes_ids", gold_boxes_ids)
+
             gold_labels = targets[0]["labels"]
+            #print("gold_labels", gold_labels)
 
 
-            pred_boxes = results["pred_boxes"][0]
-            pred_boxes_ids = results["pred_boxes_label"][0]
-            pred_labels = results["ffn_preds"][0]
+
+            pred_h_boxes = results["h_box"]
+            #print("pred_h_boxes", pred_h_boxes)
+            pred_o_boxes = results["o_box"]
+            #print("pred_o_boxes", pred_o_boxes)
+            pred_boxes_ids = results["pred_boxes_label"]
+            #print("pred_boxes_ids", pred_boxes_ids)
+            pred_labels = results["ffn_preds"]
+            #print("pred_labels", pred_labels)
             pred_labels = F.softmax(pred_labels, dim=1)
+            #print("pred_labels", pred_labels)
 
-            for g_box, g_id, g_label in zip(gold_boxes, gold_boxes_ids, gold_labels):
-                #if g_id.item() != 49:
-                #    continue
+
+            for g_h_box, g_o_box, g_id, g_label in zip(gold_h_boxes, gold_o_boxes, gold_boxes_ids, gold_labels):
                 all_all_pred += 1
 
                 possible_p_idx = []
-                for p_idx, (p_box, p_id, p_label) in enumerate(zip(pred_boxes, pred_boxes_ids, pred_labels)):
-                    box_iou = get_iou({"x1": p_box[0], "x2": p_box[2], "y1": p_box[1], "y2": p_box[3]},
-                                           {"x1": g_box[0], "x2": g_box[2], "y1": g_box[1],
-                                            "y2": g_box[3]})
-                    if box_iou > 0.4 and p_id == g_id:
+                for p_idx, (p_h_box, p_o_box, p_id, p_label) in enumerate(zip(pred_h_boxes, pred_o_boxes, pred_boxes_ids, pred_labels)):
+                    box_iou_h = get_iou({"x1": p_h_box[0], "x2": p_h_box[2], "y1": p_h_box[1], "y2": p_h_box[3]},
+                                           {"x1": g_h_box[0], "x2": g_h_box[2], "y1": g_h_box[1],
+                                            "y2": g_h_box[3]})
+                    box_iou_o = get_iou({"x1": p_o_box[0], "x2": p_o_box[2], "y1": p_o_box[1], "y2": p_o_box[3]},
+                                           {"x1": g_o_box[0], "x2": g_o_box[2], "y1": g_o_box[1],
+                                            "y2": g_o_box[3]})
+                    box_iou = min(box_iou_o, box_iou_h)
+                    if box_iou > 0.5:
                         possible_p_idx.append(p_idx)
 
-                if len(possible_p_idx) == 1:
-                    found_id += 1
-                    _, gold = torch.max(g_label, 0)
-                    _, predicted = torch.max(pred_labels[possible_p_idx[0]], 0)
-                    if gold.item() == predicted.item():
+
+                if len(possible_p_idx) > 0:
+                    pred_list = []
+                    for possible_p_id in possible_p_idx:
+                        found_id += 1
+                        _, gold = torch.max(g_label, 0)
+                        _, predicted = torch.max(pred_labels[possible_p_id], 0)
+                        if gold.item() == predicted.item():
+                            pred_list.append(1)
+                        else:
+                            pred_list.append(0)
+                    if sum(pred_list) / len(pred_list) > 0.5:
                         correct_id += 1
 
-
         results = {"found_correct_soft": correct_id / found_id, "all_correct_soft": correct_id / all_all_pred}
+        print(results)
+        exit()
         return results
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--lr-head', default=1e-4, type=float)
-    parser.add_argument('--batch-size', default=4, type=int)
+    parser.add_argument('--batch-size', default=8, type=int)
     parser.add_argument('--weight-decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=5, type=int)
     parser.add_argument('--lr-drop', default=10, type=int)

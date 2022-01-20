@@ -206,8 +206,6 @@ class UPT(nn.Module):
         detections = []
         for rp, h, o, lg, pr, obj, attn, size, ut, pt, bps in zip(
             region_props, bh, bo, logits, prior, objects, attn_maps, image_sizes, unary_tokens, pairwise_tokens, box_pair_spatial):
-            print("---")
-            print(lg.size())
 
             pr = pr.prod(0)
             x, y = torch.nonzero(pr).unbind(1)
@@ -279,14 +277,10 @@ class UPT(nn.Module):
         logits, prior, bh, bo, objects, attn_maps, unary_tokens, pairwise_tokens, box_pair_spatial = self.interaction_head(
             src, image_sizes, region_props
         )
-        print("....")
-        print(pairwise_tokens)
-        print(pairwise_tokens.size())
-        print(logits.size())
-        #print("....")
+
         boxes = [r['boxes'] for r in region_props]
 
-        return dict(boxes=boxes, bh=bh, bo=bo, logits=logits, prior=prior, pairwise_tokens=pairwise_tokens)
+        return dict(boxes=boxes, bh=bh, bo=bo, logits=logits, prior=prior, pairwise_tokens=pairwise_tokens, objects=objects)
 
         if self.training:
             interaction_loss = self.compute_interaction_loss(boxes, bh, bo, logits, prior, targets)
