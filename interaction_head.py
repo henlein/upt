@@ -296,6 +296,7 @@ class InteractionHead(nn.Module):
         prior_collated = []
         object_class_collated = []
         pairwise_tokens_collated = []
+        pre_pairwise_tokens_collated = []
         attn_maps_collated = []
         unary_tokens_collated = []
         box_pair_spatial_reshaped_collated = []
@@ -314,6 +315,10 @@ class InteractionHead(nn.Module):
             # Skip image when there are no valid human-object pairs
             if n_h == 0 or n <= 1:
                 pairwise_tokens_collated.append(torch.zeros(
+                    0, 2 * self.representation_size,
+                    device=device)
+                )
+                pre_pairwise_tokens_collated.append(torch.zeros(
                     0, 2 * self.representation_size,
                     device=device)
                 )
@@ -372,6 +377,8 @@ class InteractionHead(nn.Module):
                     box_pair_spatial_reshaped[x_keep, y_keep])
             ], dim=1)
             # Run the competitive layer
+            pre_pairwise_tokens_collated.append(pairwise_tokens)
+
             pairwise_tokens, pairwise_attn = self.comp_layer(pairwise_tokens)
 
             pairwise_tokens_collated.append(pairwise_tokens)
@@ -388,8 +395,10 @@ class InteractionHead(nn.Module):
             box_pair_spatial_reshaped_collated.append(box_pair_spatial_reshaped)
 
         pairwise_tokens_collated = torch.cat(pairwise_tokens_collated)
+        pre_pairwise_tokens_collated = torch.cat(pre_pairwise_tokens_collated)
+
         logits = self.box_pair_predictor(pairwise_tokens_collated)
 
         return logits, prior_collated, \
             boxes_h_collated, boxes_o_collated, object_class_collated, attn_maps_collated, \
-               unary_tokens_collated, pairwise_tokens_collated, box_pair_spatial_reshaped_collated
+               unary_tokens_collated, pairwise_tokens_collated, pre_pairwise_tokens_collated, box_pair_spatial_reshaped_collated

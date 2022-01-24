@@ -274,13 +274,13 @@ class UPT(nn.Module):
         results = self.postprocessor(results, image_sizes)
 
         region_props = self.prepare_region_proposals(results, outputs)
-        logits, prior, bh, bo, objects, attn_maps, unary_tokens, pairwise_tokens, box_pair_spatial = self.interaction_head(
+        logits, prior, bh, bo, objects, attn_maps, unary_tokens, pairwise_tokens, pre_pairwise_tokens, box_pair_spatial = self.interaction_head(
             src, image_sizes, region_props
         )
 
         boxes = [r['boxes'] for r in region_props]
 
-        return dict(boxes=boxes, bh=bh, bo=bo, logits=logits, prior=prior, pairwise_tokens=pairwise_tokens, objects=objects)
+        return dict(boxes=boxes, bh=bh, bo=bo, logits=logits, prior=prior, pairwise_tokens=pairwise_tokens, pre_pairwise_tokens=pre_pairwise_tokens, objects=objects)
 
         if self.training:
             interaction_loss = self.compute_interaction_loss(boxes, bh, bo, logits, prior, targets)

@@ -40,6 +40,8 @@ class HICODetOriRel(ImageDataset):
 
         self._load_annotation_and_metadata(anno_ori)
 
+
+
     def __len__(self) -> int:
         """Return the number of images"""
         return len(self._anno)
@@ -224,8 +226,9 @@ class HICODetOriRel(ImageDataset):
 
         count_regions = 0
         count_labels = torch.zeros(6)
-        zero_label_vec = torch.zeros(6)
         for anno_idx, (anno_key, anno) in enumerate(f["_via_img_metadata"].items()):
+            #print(anno)
+            #exit()
             #print(anno_idx)
             bboxes = []
             fronts = []
@@ -295,7 +298,31 @@ class HICODetOriRel(ImageDataset):
                 if len(boxes_h) > 0:
                     anno_dict = {"filename": anno["filename"], "boxes_h": torch.tensor(boxes_h), "boxes_o": torch.tensor(boxes_o), "object": torch.tensor(o_names), "labels": torch.FloatTensor(labels)}
                     self._anno.append(anno_dict)
+                    for lab in anno_dict["labels"]:
+                        count_labels += lab
+                        count_regions += 1
 
+        self.dataset_weights = self.calculate_pos_weights(count_labels, count_regions)
+        print(self.dataset_weights)
+
+def compute_rel_ori(hbox_front, hbox_up, obox_front, obox_up):
+    # HEAVY TOTO!!!
+    if hbox_up == [0, 0, 0] or obox_up == [0, 0, 0]:
+        return [1, 0, 0, 0, 0, 0] #Same Direction
+    elif hbox_up == obox_up:
+        return [1, 0, 0, 0, 0, 0] #Same Direction
+    elif hbox_front == obox_up:
+        return [0, 0, 1, 0, 0, 0]
+
+    obox_up_inv = [x * -1 for x in obox_up]
+    if hbox_up == obox_up_inv:
+        return [0, 1, 0, 0, 0, 0]
+    if hbox_front == obox_up_inv:
+        return [0, 0, 0, 1, 0, 0]
+
+    return [0, 0, 0, 0, 1, 0]
+
+'''
 def compute_rel_ori(hbox_front, hbox_up, obox_front, obox_up):
     # HEAVY TOTO!!!
 
@@ -317,7 +344,7 @@ def compute_rel_ori(hbox_front, hbox_up, obox_front, obox_up):
     #print(hbox_front)
     #print(obox_front)
     return [0, 0, 1]
-
+'''
 
 class DataFactoryOri(Dataset):
     def __init__(self, dataset, name, train: bool):

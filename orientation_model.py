@@ -1,5 +1,6 @@
 from upt import build_detector
 import numpy as np
+import pocket
 import torch
 from torch import nn, Tensor
 from torch.nn.functional import binary_cross_entropy_with_logits
@@ -20,6 +21,7 @@ class OrientationModel(nn.Module):
         self.input_type = args.input_version
         self.loss_type = args.loss_version
         self.label_weights = label_weights
+        self.ff1_hidden = args.ff1_hidden
         class_corr = [[0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1],
                       [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1],
                       [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1],
@@ -37,6 +39,13 @@ class OrientationModel(nn.Module):
         for param in self.upt.parameters():
             param.requires_grad = False
 
+        self.comp_layer = pocket.models.TransformerEncoderLayer(
+            hidden_size=1024,
+            return_weights=True
+        )
+        if self.input_type == 1:
+            pretrained_comp = self.upt.interaction_head.comp_layer.state_dict()
+            self.comp_layer.load_state_dict(pretrained_comp)
         '''
         self.coop_layer = ModifiedEncoder(
             hidden_size=args.hidden_dim,
@@ -51,11 +60,10 @@ class OrientationModel(nn.Module):
         self.coop_layer.load_state_dict(pretrained_coop)
         print("Loading worked :)")
         '''
-        self.ori_fc_1 = nn.Linear(1024, 512)
+        self.ori_fc_1 = nn.Linear(1024, self.ff1_hidden)
 
         self.relu1 = nn.ReLU()
-        self.ori_fc_2 = nn.Linear(512, self.num_classes)
-
+        self.ori_fc_2 = nn.Linear(self.ff1_hidden, self.num_classes)
 
     def train(self, mode=True):
         super(OrientationModel, self).train(mode)
@@ -89,22 +97,23 @@ class OrientationModel(nn.Module):
         prior = upt_feature["prior"]
         objects = upt_feature["objects"]
         pairwise_tokens = upt_feature["pairwise_tokens"]
-
+        pre_pairwise_tokens = upt_feature["pre_pairwise_tokens"]
         if self.training:
             filtered_labels = []
             filtered_features = []
             for bx, h, o, target in zip(boxes, bh, bo, targets):
                 lab, x = self.associate_with_ground_truth(bx[h], bx[o], target)
                 filtered_labels.append(lab)
-                filtered_feature = pairwise_tokens[x]
+                filtered_feature = pre_pairwise_tokens[x] # HERE Change Input Feature
                 filtered_features.append(filtered_feature)
             filtered_labels = torch.cat(filtered_labels)
             filtered_features = torch.cat(filtered_features)
         else:
             filtered_features = pairwise_tokens
 
+        out, _ = self.comp_layer(filtered_features)
 
-        out = self.ori_fc_1(filtered_features)
+        out = self.ori_fc_1(out)
         out = self.relu1(out)
         out = self.ori_fc_2(out)
 
