@@ -75,9 +75,18 @@ class DataFactory(Dataset):
         if name == 'hicodet':
             assert partition in ['train2015', 'test2015'], \
                 "Unknown HICO-DET partition " + partition
+            """
             self.dataset = HICODet(
-                root=os.path.join(data_root, 'hico_20160224_det/images', partition),
+                root=os.path.join(data_root, 'hico_20160224_det/images', "partition"),
                 anno_file=os.path.join(data_root, 'instances_{}.json'.format(partition)),
+                target_transform=pocket.ops.ToTensor(input_format='dict')
+            )
+            """
+            self.dataset = HICODet(
+                root=os.path.join(data_root, 'hico_20160224_det/images', "merged2015"),
+                # anno_file=os.path.join(data_root, 'hicodet_obj_split',  'bicycle_train_2384.json'),
+                # anno_file=os.path.join(data_root, 'hicodet_verb_split', 'drive_train_1432.json'),
+                anno_file=os.path.join(data_root, 'hicodet_hoi_split', 'book_read_train_1827.json'),
                 target_transform=pocket.ops.ToTensor(input_format='dict')
             )
         else:

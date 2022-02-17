@@ -26,9 +26,7 @@ warnings.filterwarnings("ignore")
 
 def main(rank, args):
     if rank == 0:
-        wandb.init(project="upt-sweep", config=args)
-        print("1")
-        #args = wandb.config
+        wandb.init(project="upt-eval", config=args)
 
     dist.init_process_group(
         backend="nccl",
@@ -71,12 +69,9 @@ def main(rank, args):
     args.num_classes = 2
 
     upt = build_detector(args, object_to_target)
-    print("2")
     if rank == 0:
-        print("3")
         wandb.watch(upt, log_freq=args.print_interval)
-        print("4")
-    print("5")
+
     if os.path.exists(args.resume):
         print(f"=> Rank {rank}: continue from saved checkpoint {args.resume}")
         checkpoint = torch.load(args.resume, map_location='cpu')
@@ -90,7 +85,7 @@ def main(rank, args):
         outdir = args.output_dir + "/" + wandb.run.name + "/"
     else:
         outdir = args.output_dir + "/rank1/"
-    print("5")
+
     engine = CustomisedDLE(
         upt, train_loader,
         max_norm=args.clip_max_norm,
@@ -154,17 +149,21 @@ def main(rank, args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+
+    parser.add_argument('--lr-head', default=0.00013, type=float) # <----
+    parser.add_argument('--batch-size', default=8, type=int)
+    parser.add_argument('--weight-decay', default=0.00047, type=float) # <----
+    parser.add_argument('--epochs', default=20, type=int)
+    parser.add_argument('--lr-drop', default=82, type=int) # <----
+    parser.add_argument('--clip-max-norm', default=0.18, type=float) # <----
+    """
     parser.add_argument('--lr-head', default=1e-4, type=float)
     parser.add_argument('--batch-size', default=8, type=int)
     parser.add_argument('--weight-decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=20, type=int)
     parser.add_argument('--lr-drop', default=10, type=int)
     parser.add_argument('--clip-max-norm', default=0.1, type=float)
-
-    #parser.add_argument('--backbone', default='resnet50', type=str)
-    #parser.add_argument('--dilation', action='store_true')
-    #parser.add_argument('--position-embedding', default='sine', type=str, choices=('sine', 'learned'))
-
+    """
     parser.add_argument('--repr-dim', default=512, type=int)
     parser.add_argument('--hidden-dim', default=256, type=int)
     parser.add_argument('--enc-layers', default=6, type=int)
@@ -184,14 +183,17 @@ if __name__ == '__main__':
     parser.add_argument('--eos-coef', default=0.1, type=float,
                         help="Relative classification weight of the no-object class")
 
+    parser.add_argument('--alpha', default=0.25, type=float)  # <---
+    parser.add_argument('--gamma', default=0.85, type=float)  # <---
+    """
     parser.add_argument('--alpha', default=0.5, type=float)
     parser.add_argument('--gamma', default=0.2, type=float)
-
+    """
     parser.add_argument('--dataset', default='hicodet', type=str)
     parser.add_argument('--partitions', nargs='+', default=['train2015', 'test2015'], type=str)
     parser.add_argument('--num-workers', default=2, type=int)
     #parser.add_argument('--data-root', default='./hicodet')
-    parser.add_argument('--data-root', default='../HicoDetDataset')
+    parser.add_argument('--data-root', default='/mnt/hydra/ssd4/team/henlein/HicoDetDataset')
 
     # training parameters
     parser.add_argument('--device', default='cuda',
