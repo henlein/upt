@@ -14,7 +14,7 @@ import random
 import warnings
 import argparse
 import numpy as np
-import wandb
+#import wandb
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.utils.data import DataLoader, DistributedSampler
@@ -25,12 +25,12 @@ from utils import custom_collate, CustomisedDLE, DataFactory
 warnings.filterwarnings("ignore")
 
 def main(rank, args):
-    if rank == 0:
-        wandb.init(project="upt-eval", config=args)
+    #if rank == 0:
+    #    wandb.init(project="upt-eval", config=args)
 
     dist.init_process_group(
-        backend="nccl",
-        #backend="gloo",
+        #backend="nccl",
+        backend="gloo",
         init_method="env://",
         world_size=args.world_size,
         rank=rank
@@ -69,8 +69,8 @@ def main(rank, args):
     args.num_classes = 2
 
     upt = build_detector(args, object_to_target)
-    if rank == 0:
-        wandb.watch(upt, log_freq=args.print_interval)
+    #if rank == 0:
+    #    wandb.watch(upt, log_freq=args.print_interval)
 
     if os.path.exists(args.resume):
         print(f"=> Rank {rank}: continue from saved checkpoint {args.resume}")
@@ -81,11 +81,11 @@ def main(rank, args):
 
     print("CustomisedDLE")
 
-    if rank == 0:
-        outdir = args.output_dir + "/" + wandb.run.name + "/"
-    else:
-        outdir = args.output_dir + "/rank1/"
-
+    #if rank == 0:
+    #    outdir = args.output_dir + "/" + wandb.run.name + "/"
+    #else:
+    #    outdir = args.output_dir + "/rank1/"
+    outdir = args.output_dir + "/rank1/"
     engine = CustomisedDLE(
         upt, train_loader,
         max_norm=args.clip_max_norm,
@@ -107,18 +107,28 @@ def main(rank, args):
     if args.eval:
         if args.dataset == 'vcoco':
             raise NotImplementedError(f"Evaluation on V-COCO has not been implemented.")
-        ap, my_dict = engine.test_hico(test_loader)
+        eval1, my_dict = engine.test_hico(test_loader)
+        ap, max_rec = eval1
+        #avg_prec = eval2
+
         # Fetch indices for rare and non-rare classes
         num_anno = torch.as_tensor(trainset.dataset.anno_interaction)
         rare = torch.nonzero(num_anno < 10).squeeze(1)
         non_rare = torch.nonzero(num_anno >= 10).squeeze(1)
         ap = ap.detach().cpu().numpy()
         ap[ap == 0] = np.nan
+        max_rec = max_rec.detach().cpu().numpy()
+        max_rec[max_rec == 0] = np.nan
+
         print(ap)
+        print(max_rec)
         print(
             f"The mAP is {np.nanmean(ap):.4f},"
             f" rare: {np.nanmean(ap[rare]):.4f},"
             f" none-rare: {np.nanmean(ap[non_rare]):.4f}"
+            f" The Recall is {np.nanmean(max_rec):.4f},"
+            f" rare: {np.nanmean(max_rec[rare]):.4f},"
+            f" none-rare: {np.nanmean(max_rec[non_rare]):.4f}"
         )
         print("========")
         print(my_dict)
@@ -142,14 +152,14 @@ def main(rank, args):
     print("Start Engine")
     engine(args.epochs)
 
-    if rank == 0:
-        print("Finish WANDB1")
-        wandb.finish(0)
+    #if rank == 0:
+    #    print("Finish WANDB1")
+    #    wandb.finish(0)
 
 
 if __name__ == '__main__':
     # nohup python main.py > log-3-hyperopt.txt 2>&1 &
-    # python main.py --world-size 1 --eval --resume /mnt/hydra/ssd4/team/henlein/upt-eval/models/desired-lovebird-3/ckpt_41940_20.pt
+    # CUDA_VISIBLE_DEVICES=1 python main.py --world-size 1 --eval --resume /mnt/hydra/ssd4/team/henlein/upt-eval/models/desired-lovebird-3/ckpt_41940_20.pt
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--lr-head', default=0.00013, type=float) # <----

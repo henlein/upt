@@ -551,6 +551,17 @@ class HICODet(ImageDataset):
                 newobjid = self.label2id[objstr.replace("_", " ")]
 
                 verbstr = self._verbs[verbidx]
+
+                #if objstr != "bicycle":
+                #    continue
+
+                #if verbstr != "drive":
+                #    continue
+
+                if objstr != "book" or verbstr != "read":
+                    continue
+
+
                 if (objstr.replace(" ", "_"), verbstr) not in self.hoi_annotation:
                     continue
                 newverbid = self.hoi_annotation[(objstr.replace(" ", "_"), verbstr)]
@@ -589,6 +600,8 @@ class HICODet(ImageDataset):
                 f['empty'].append(anno_idx)
 
         idx = list(range(len(f['filenames'])))
+        assert len(self._anno) == len(idx)
+
         for empty_idx in list(set(f['empty'])):
             idx.remove(empty_idx)
 

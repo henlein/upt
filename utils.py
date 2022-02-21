@@ -16,12 +16,12 @@ import scipy.io as sio
 from tqdm import tqdm
 from collections import defaultdict
 from torch.utils.data import Dataset
-
+from torch import Tensor
 from hicodet.hicodet import HICODet
 
 import pocket
 from pocket.core import DistributedLearningEngine
-from pocket.utils import DetectionAPMeter, BoxPairAssociation
+from pocket.utils import DetectionAPMeter, BoxPairAssociation, AveragePrecisionMeter
 
 import sys
 sys.path.append('detr')
@@ -85,9 +85,9 @@ class DataFactory(Dataset):
             self.dataset = HICODet(
                 root=os.path.join(data_root, 'hico_20160224_det/images', "merged2015"),
                 anno_file=os.path.join(data_root, 'instances_test2015.json'),
-                #anno_file=os.path.join(data_root, 'hicodet_obj_split',  'bicycle_train_2384.json'),
-                #anno_file=os.path.join(data_root, 'hicodet_verb_split', 'drive_train_1432.json'),
-                #anno_file=os.path.join(data_root, 'hicodet_hoi_split', 'book_read_train_1827.json'),
+                #anno_file=os.path.join(data_root, 'hicodet_obj_split',  'bicycle_test_2384.json'),
+                #anno_file=os.path.join(data_root, 'hicodet_verb_split', 'drive_test_1432.json'),
+                #anno_file=os.path.join(data_root, 'hicodet_hoi_split', 'book_read_test_1827.json'),
                 #anno_file=os.path.join(data_root, 'hicodet_obj_split', 'book_train_1050.json'),
                 #anno_file=os.path.join(data_root, 'instances_marges2015.json'),
                 target_transform=pocket.ops.ToTensor(input_format='dict')
@@ -157,6 +157,65 @@ class CacheTemplate(defaultdict):
         else:
             return [0., 0., .1, .1, 0.]
 
+class MyEval(DetectionAPMeter):
+    def eval(self):
+        """
+        Evaluate the average precision based on collected statistics
+
+        Returns:
+            torch.Tensor[K]: Average precisions for K classes
+        """
+        self._output = [torch.cat([
+            out1, torch.as_tensor(out2, dtype=self._dtype)
+        ]) for out1, out2 in zip(self._output, self._output_temp)]
+        self._labels = [torch.cat([
+            tar1, torch.as_tensor(tar2, dtype=self._dtype)
+        ]) for tar1, tar2 in zip(self._labels, self._labels_temp)]
+        self.reset(keep_old=True)
+
+        self.ap, self.max_rec = self.compute_ap(self._output, self._labels, self.num_gt,
+            nproc=self._nproc, algorithm=self.algorithm)
+
+        return self.ap, self.max_rec
+
+
+class MyEval2(AveragePrecisionMeter):
+    def eval(self) -> Tensor:
+        """
+        Evaluate the average precision based on collected statistics
+
+        Returns:
+            torch.Tensor[K]: Average precisions for K classes
+        """
+        self._output = torch.cat([
+            self._output,
+            torch.cat(self._output_temp, 0)
+        ], 0)
+        self._labels = torch.cat([
+            self._labels,
+            torch.cat(self._labels_temp, 0)
+        ], 0)
+        self.reset(keep_old=True)
+
+        # Sanity check
+        if self.num_gt is not None:
+            self.num_gt = self.num_gt.to(dtype=self._labels.dtype)
+            print(":::::::::::::::::::::::::::::::::::::::::::::::")
+            print(self.num_gt)
+            print(self._labels.sum(0))
+            faulty_cls = torch.nonzero(self._labels.sum(0) > self.num_gt).squeeze(1)
+            if len(faulty_cls):
+                raise AssertionError("Class {}: ".format(faulty_cls.tolist())+
+                    "Number of true positives larger than that of ground truth")
+        if len(self._output) and len(self._labels):
+            return self.compute_ap(self._output, self._labels, num_gt=self.num_gt,
+                algorithm=self.algorithm, chunksize=self._chunksize)
+        else:
+            print("WARNING: Collected results are empty. "
+                "Return zero AP for all class.")
+            return torch.zeros(self._output.shape[1], dtype=self._dtype)
+
+
 class CustomisedDLE(DistributedLearningEngine):
     def __init__(self, net, dataloader, max_norm=0, num_classes=117, **kwargs):
         super().__init__(net, None, dataloader, **kwargs)
@@ -206,16 +265,20 @@ class CustomisedDLE(DistributedLearningEngine):
 
         #test_anno = [0 for _ in range(len(dataset.anno_interaction))]
         #test_anno[30] = 2
-        meter = DetectionAPMeter(
+        meter = MyEval(
             91 * 2, nproc=1,
-            #num_gt=test_anno,
             num_gt=dataset.anno_interaction,
             algorithm='11P'
         )
 
-        for batch_idx, batch in tqdm(enumerate(dataloader)):
-            if batch_idx < 4:
-                continue
+        meter2 = MyEval2(
+            num_gt=dataset.anno_interaction,
+            algorithm='11P'
+        )
+
+        for batch_idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
+            #if batch_idx > 10:
+            #     break
 
             inputs = pocket.ops.relocate_to_cuda(batch[0])
             #print("----")
@@ -259,6 +322,7 @@ class CustomisedDLE(DistributedLearningEngine):
             #print(interactions)
             #print(labels)
             meter.append(scores, interactions, labels)
+            #meter2.append(interactions, labels)
 
 
 
@@ -275,7 +339,7 @@ class CustomisedDLE(DistributedLearningEngine):
             pred_verb_score = []
             for hbox, obox, score, obj in zip(boxes_h_filter, boxes_o_filter, scores_reshape, objects_filter.reshape(-1, 1)):
                 max_score, max_idx = torch.max(score, 0)
-                if max_score.item() > 0.1:
+                if max_score.item() > 0.2:
                     pred_hbox.append(hbox)
                     pred_obox.append(obox)
                     pred_obj.append(obj.item())
@@ -321,7 +385,7 @@ class CustomisedDLE(DistributedLearningEngine):
                     all_wrong[-1] += 1
 
             missed.append(len(target["verb"]) - sum([all_correct[-1], verb_correct_obj_wrong[-1], obj_correct_verb_wrong[-1], obj_wrong_verb_wrong[-1]]))
-            break
+            #break
         return meter.eval(), {"all_correct": sum(all_correct), "verb_correct_obj_wrong": sum(verb_correct_obj_wrong), "obj_correct_verb_wrong": sum(obj_correct_verb_wrong),
                               "obj_wrong_verb_wrong": sum(obj_wrong_verb_wrong), "all_wrong": sum(all_wrong), "missed": sum(missed)}
 
