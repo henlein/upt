@@ -114,7 +114,7 @@ def main(rank, args):
         non_rare = torch.nonzero(num_anno >= 10).squeeze(1)
         ap = ap.detach().cpu().numpy()
         ap[ap == 0] = np.nan
-        #print(ap)
+        print(ap)
         print(
             f"The mAP is {np.nanmean(ap):.4f},"
             f" rare: {np.nanmean(ap[rare]):.4f},"
@@ -148,6 +148,8 @@ def main(rank, args):
 
 
 if __name__ == '__main__':
+    # nohup python main.py > log-3-hyperopt.txt 2>&1 &
+    # python main.py --world-size 1 --eval --resume /mnt/hydra/ssd4/team/henlein/upt-eval/models/desired-lovebird-3/ckpt_41940_20.pt
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--lr-head', default=0.00013, type=float) # <----
@@ -202,7 +204,8 @@ if __name__ == '__main__':
     parser.add_argument('--seed', default=66, type=int)
     parser.add_argument('--pretrained', default='', help='Path to a pretrained detector')
     parser.add_argument('--resume', default='', help='Resume from a model')
-    parser.add_argument('--output-dir', default='checkpoints')
+    #parser.add_argument('--output-dir', default='checkpoints')
+    parser.add_argument('--output-dir', default="/mnt/hydra/ssd4/team/henlein/upt-eval/models")
     parser.add_argument('--print-interval', default=500, type=int)
     parser.add_argument('--world-size', default=2, type=int)
     parser.add_argument('--eval', action='store_true')

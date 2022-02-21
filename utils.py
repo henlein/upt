@@ -84,9 +84,12 @@ class DataFactory(Dataset):
             """
             self.dataset = HICODet(
                 root=os.path.join(data_root, 'hico_20160224_det/images', "merged2015"),
-                # anno_file=os.path.join(data_root, 'hicodet_obj_split',  'bicycle_train_2384.json'),
-                # anno_file=os.path.join(data_root, 'hicodet_verb_split', 'drive_train_1432.json'),
-                anno_file=os.path.join(data_root, 'hicodet_hoi_split', 'book_read_train_1827.json'),
+                anno_file=os.path.join(data_root, 'instances_test2015.json'),
+                #anno_file=os.path.join(data_root, 'hicodet_obj_split',  'bicycle_train_2384.json'),
+                #anno_file=os.path.join(data_root, 'hicodet_verb_split', 'drive_train_1432.json'),
+                #anno_file=os.path.join(data_root, 'hicodet_hoi_split', 'book_read_train_1827.json'),
+                #anno_file=os.path.join(data_root, 'hicodet_obj_split', 'book_train_1050.json'),
+                #anno_file=os.path.join(data_root, 'instances_marges2015.json'),
                 target_transform=pocket.ops.ToTensor(input_format='dict')
             )
         else:
@@ -234,9 +237,9 @@ class CustomisedDLE(DistributedLearningEngine):
             verbs = output['labels']
             interactions = conversion[objects, verbs]
             gt_bx_h = net.module.recover_boxes(target['boxes_h'], target['size'])
-            print(gt_bx_h)
+            #print(gt_bx_h)
             gt_bx_o = net.module.recover_boxes(target['boxes_o'], target['size'])
-            print(gt_bx_o)
+            #print(gt_bx_o)
             labels = torch.zeros_like(scores)
             unique_hoi = interactions.unique()
 
@@ -251,10 +254,10 @@ class CustomisedDLE(DistributedLearningEngine):
                         boxes_o[det_idx].view(-1, 4)),
                         scores[det_idx].view(-1)
                     )
-            print(".....")
-            print(scores)
-            print(interactions)
-            print(labels)
+            #print(".....")
+            #print(scores)
+            #print(interactions)
+            #print(labels)
             meter.append(scores, interactions, labels)
 
 
@@ -293,7 +296,7 @@ class CustomisedDLE(DistributedLearningEngine):
             obj_wrong_verb_wrong.append(0)
             all_wrong.append(0)
             for hbox, obox, verb, obj in zip(pred_hbox, pred_obox, pre_verb, pred_obj):
-                print(str(hbox) + " - " + str(obox) + " :" + str(obj) + " - " + str(verb))
+                #print(str(hbox) + " - " + str(obox) + " :" + str(obj) + " - " + str(verb))
                 found = False
                 for ghbox, gobox, gverb, gobj in zip(gt_bx_h, gt_bx_o, target["verb"], target["object"]):
                     hbox_overlap = get_iou({"x1": hbox[0].item(), "x2": hbox[2].item(), "y1": hbox[1].item(), "y2": hbox[3].item()},
