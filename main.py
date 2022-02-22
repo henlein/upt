@@ -14,7 +14,7 @@ import random
 import warnings
 import argparse
 import numpy as np
-#import wandb
+import wandb
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.utils.data import DataLoader, DistributedSampler
@@ -25,12 +25,12 @@ from utils import custom_collate, CustomisedDLE, DataFactory
 warnings.filterwarnings("ignore")
 
 def main(rank, args):
-    #if rank == 0:
-    #    wandb.init(project="upt-eval", config=args)
+    if rank == 0:
+        wandb.init(project="upt-eval", config=args)
 
     dist.init_process_group(
-        #backend="nccl",
-        backend="gloo",
+        backend="nccl",
+        #backend="gloo",
         init_method="env://",
         world_size=args.world_size,
         rank=rank
@@ -69,8 +69,8 @@ def main(rank, args):
     args.num_classes = 2
 
     upt = build_detector(args, object_to_target)
-    #if rank == 0:
-    #    wandb.watch(upt, log_freq=args.print_interval)
+    if rank == 0:
+        wandb.watch(upt, log_freq=args.print_interval)
 
     if os.path.exists(args.resume):
         print(f"=> Rank {rank}: continue from saved checkpoint {args.resume}")
@@ -81,10 +81,10 @@ def main(rank, args):
 
     print("CustomisedDLE")
 
-    #if rank == 0:
-    #    outdir = args.output_dir + "/" + wandb.run.name + "/"
-    #else:
-    #    outdir = args.output_dir + "/rank1/"
+    if rank == 0:
+        outdir = args.output_dir + "/" + wandb.run.name + "/"
+    else:
+        outdir = args.output_dir + "/rank1/"
     outdir = args.output_dir + "/rank1/"
     engine = CustomisedDLE(
         upt, train_loader,
@@ -152,9 +152,9 @@ def main(rank, args):
     print("Start Engine")
     engine(args.epochs)
 
-    #if rank == 0:
-    #    print("Finish WANDB1")
-    #    wandb.finish(0)
+    if rank == 0:
+        print("Finish WANDB1")
+        wandb.finish(0)
 
 
 if __name__ == '__main__':

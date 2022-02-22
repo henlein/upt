@@ -558,8 +558,8 @@ class HICODet(ImageDataset):
                 #if verbstr != "drive":
                 #    continue
 
-                if objstr != "book" or verbstr != "read":
-                    continue
+                #if objstr != "book" or verbstr != "read":
+                #    continue
 
 
                 if (objstr.replace(" ", "_"), verbstr) not in self.hoi_annotation:

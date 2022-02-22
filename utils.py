@@ -84,7 +84,8 @@ class DataFactory(Dataset):
             """
             self.dataset = HICODet(
                 root=os.path.join(data_root, 'hico_20160224_det/images', "merged2015"),
-                anno_file=os.path.join(data_root, 'instances_test2015.json'),
+                #anno_file=os.path.join(data_root, 'instances_test2015.json'),
+                anno_file=os.path.join(data_root, 'hicodet_verb_split', 'read_train_1548.json'),
                 #anno_file=os.path.join(data_root, 'hicodet_obj_split',  'bicycle_test_2384.json'),
                 #anno_file=os.path.join(data_root, 'hicodet_verb_split', 'drive_test_1432.json'),
                 #anno_file=os.path.join(data_root, 'hicodet_hoi_split', 'book_read_test_1827.json'),
