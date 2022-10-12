@@ -5,8 +5,8 @@
 5. Object2 Excluded Model: honest-wildflower-10 (book_train_1050.json)
 6. Verb1 Excluded Model: copper-bird-7 (drive_train_1432.json)
 7. Verb2 Excluded Model: lunar-monkey-12 (read_train_1548.json)
-8. HOI1 Excluded Model: vital-cloud-8 (book_read_train_1827.json) Have to repeat ....
-9. HOI2 Excluded Model:
+8. HOI1 Excluded Model: vital-cloud-8 (book_read_train_1827.json) Have to repeat -> fearless-sound-13
+9. HOI2 Excluded Model: different-water-14 (car_drive_train_2126.json)
 
 
 

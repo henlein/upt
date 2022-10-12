@@ -26,7 +26,7 @@ warnings.filterwarnings("ignore")
 
 def main(rank, args):
     if rank == 0:
-        wandb.init(project="upt-eval", config=args)
+        wandb.init(project="upt-subset_v2", config=args)
 
     dist.init_process_group(
         backend="nccl",
@@ -82,10 +82,10 @@ def main(rank, args):
     print("CustomisedDLE")
 
     if rank == 0:
-        outdir = args.output_dir + "/" + wandb.run.name + "/"
+        outdir = args.output_dir + "/" + wandb.run.name + "_rank0/"
     else:
         outdir = args.output_dir + "/rank1/"
-    outdir = args.output_dir + "/rank1/"
+    #outdir = args.output_dir + "/rank1/"
     engine = CustomisedDLE(
         upt, train_loader,
         max_norm=args.clip_max_norm,
@@ -96,13 +96,14 @@ def main(rank, args):
         #cache_dir=args.output_dir
     )
 
-
+    """
     if args.cache:
         if args.dataset == 'hicodet':
             engine.cache_hico(test_loader, args.output_dir)
         elif args.dataset == 'vcoco':
             engine.cache_vcoco(test_loader, args.output_dir)
         return
+    """
 
     if args.eval:
         if args.dataset == 'vcoco':
@@ -215,13 +216,13 @@ if __name__ == '__main__':
     parser.add_argument('--pretrained', default='', help='Path to a pretrained detector')
     parser.add_argument('--resume', default='', help='Resume from a model')
     #parser.add_argument('--output-dir', default='checkpoints')
-    parser.add_argument('--output-dir', default="/mnt/hydra/ssd4/team/henlein/upt-eval/models")
+    parser.add_argument('--output-dir', default="/mnt/hydra/ssd4/team/henlein/upt-anno-v2/models")
     parser.add_argument('--print-interval', default=500, type=int)
     parser.add_argument('--world-size', default=2, type=int)
     parser.add_argument('--eval', action='store_true')
     parser.add_argument('--cache', action='store_true')
     parser.add_argument('--sanity', action='store_true')
-    parser.add_argument('--box-score-thresh', default=0.2, type=float)
+    parser.add_argument('--box-score-thresh', default=0.8, type=float)
     parser.add_argument('--fg-iou-thresh', default=0.5, type=float)
     parser.add_argument('--min-instances', default=3, type=int)
     parser.add_argument('--max-instances', default=15, type=int)

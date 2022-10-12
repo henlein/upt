@@ -12,7 +12,7 @@ import torch
 import pickle
 import numpy as np
 import scipy.io as sio
-
+import pandas as pd
 from tqdm import tqdm
 from collections import defaultdict
 from torch.utils.data import Dataset
@@ -75,24 +75,32 @@ class DataFactory(Dataset):
         if name == 'hicodet':
             assert partition in ['train2015', 'test2015'], \
                 "Unknown HICO-DET partition " + partition
-            """
+
             self.dataset = HICODet(
                 root=os.path.join(data_root, 'hico_20160224_det/images', "partition"),
                 anno_file=os.path.join(data_root, 'instances_{}.json'.format(partition)),
                 target_transform=pocket.ops.ToTensor(input_format='dict')
             )
+
             """
             self.dataset = HICODet(
-                root=os.path.join(data_root, 'hico_20160224_det/images', "merged2015"),
+                root=os.path.join(data_root, 'hico_20160224_det/images', "train2015"),
+                #root=os.path.join(data_root, 'hico_20160224_det/images', "merged2015"),
+                #anno_file=os.path.join(data_root, 'hicodet_obj_split', 'car_test_1087.json'),
+                anno_file=os.path.join(data_root, 'hicodet_verb_split', 'wield_test_1373.json'),
+                #anno_file=os.path.join(data_root, 'hicodet_hoi_split', 'car_drive_test_2126.json'),
+                #anno_file=os.path.join(data_root, 'instances_train2015.json'),
                 #anno_file=os.path.join(data_root, 'instances_test2015.json'),
-                anno_file=os.path.join(data_root, 'hicodet_verb_split', 'read_train_1548.json'),
+                #anno_file=os.path.join(data_root, 'hicodet_verb_split', 'read_train_1548.json'),
                 #anno_file=os.path.join(data_root, 'hicodet_obj_split',  'bicycle_test_2384.json'),
                 #anno_file=os.path.join(data_root, 'hicodet_verb_split', 'drive_test_1432.json'),
-                #anno_file=os.path.join(data_root, 'hicodet_hoi_split', 'book_read_test_1827.json'),
+                #anno_file=os.path.join(data_root, 'hicodet_hoi_split', 'book_read_train_1827.json'),
+                #anno_file=os.path.join(data_root, 'hicodet_hoi_split', 'car_drive_train_2126.json'),
                 #anno_file=os.path.join(data_root, 'hicodet_obj_split', 'book_train_1050.json'),
                 #anno_file=os.path.join(data_root, 'instances_marges2015.json'),
                 target_transform=pocket.ops.ToTensor(input_format='dict')
             )
+            """
         else:
             print("ERROR!!!")
             exit(0)
@@ -276,6 +284,10 @@ class CustomisedDLE(DistributedLearningEngine):
             num_gt=dataset.anno_interaction,
             algorithm='11P'
         )
+        all_objs = dataset.label2id.keys()
+        df = pd.DataFrame(0, columns=["all_correct", "affordance_correct_obj_wrong", "obj_correct_affordance_wrong",
+                                      "obj_wrong_affordance_wrong", "new", "missed_telic", "missed_gibs"],
+                          index=all_objs)
 
         for batch_idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
             #if batch_idx > 10:
@@ -340,7 +352,7 @@ class CustomisedDLE(DistributedLearningEngine):
             pred_verb_score = []
             for hbox, obox, score, obj in zip(boxes_h_filter, boxes_o_filter, scores_reshape, objects_filter.reshape(-1, 1)):
                 max_score, max_idx = torch.max(score, 0)
-                if max_score.item() > 0.2:
+                if max_score.item() > 0.4:
                     pred_hbox.append(hbox)
                     pred_obox.append(obox)
                     pred_obj.append(obj.item())
@@ -360,10 +372,13 @@ class CustomisedDLE(DistributedLearningEngine):
             obj_correct_verb_wrong.append(0)
             obj_wrong_verb_wrong.append(0)
             all_wrong.append(0)
+
+            found_gold = [False for x in range(len(target["object"]))]
             for hbox, obox, verb, obj in zip(pred_hbox, pred_obox, pre_verb, pred_obj):
                 #print(str(hbox) + " - " + str(obox) + " :" + str(obj) + " - " + str(verb))
                 found = False
-                for ghbox, gobox, gverb, gobj in zip(gt_bx_h, gt_bx_o, target["verb"], target["object"]):
+                obj_name = dataset.id2label[str(obj)]
+                for gidx, (ghbox, gobox, gverb, gobj) in enumerate(zip(gt_bx_h, gt_bx_o, target["verb"], target["object"])):
                     hbox_overlap = get_iou({"x1": hbox[0].item(), "x2": hbox[2].item(), "y1": hbox[1].item(), "y2": hbox[3].item()},
                                            {"x1": ghbox[0].item(), "x2": ghbox[2].item(), "y1": ghbox[1].item(),
                                             "y2": ghbox[3].item()})
@@ -373,148 +388,38 @@ class CustomisedDLE(DistributedLearningEngine):
 
                     if hbox_overlap > 0.5 and obox_overlap > 0.5:
                         found = True
+                        found_gold[gidx] = True
                         if verb == gverb.item() and obj == gobj.item():
                             all_correct[-1] += 1
+                            df.loc[obj_name, "all_correct"] += 1
                         elif verb == gverb:
                             verb_correct_obj_wrong[-1] += 1
+                            df.loc[obj_name, "affordance_correct_obj_wrong"] += 1
                         elif obj == gobj:
                             obj_correct_verb_wrong[-1] += 1
+                            df.loc[obj_name, "obj_correct_affordance_wrong"] += 1
                         else:
                             obj_wrong_verb_wrong[-1] += 1
+                            df.loc[obj_name, "obj_wrong_affordance_wrong"] += 1
                         break
                 if not found:
                     all_wrong[-1] += 1
+                    df.loc[obj_name, "new"] += 1
+
+            for found_g, obj, verb in zip(found_gold, target["object"], target["verb"]):
+                if not found_g:
+                    obj_name = dataset.id2label[str(obj.item())]
+
+                    if verb == 0:
+                        df.loc[obj_name, "missed_gibs"] += 1
+                    elif verb == 1:
+                        df.loc[obj_name, "missed_telic"] += 1
+                    else:
+                        print("!!!!!!!!!!!!!!!!!!!")
 
             missed.append(len(target["verb"]) - sum([all_correct[-1], verb_correct_obj_wrong[-1], obj_correct_verb_wrong[-1], obj_wrong_verb_wrong[-1]]))
             #break
+        #df.to_csv("test/test.csv")
         return meter.eval(), {"all_correct": sum(all_correct), "verb_correct_obj_wrong": sum(verb_correct_obj_wrong), "obj_correct_verb_wrong": sum(obj_correct_verb_wrong),
                               "obj_wrong_verb_wrong": sum(obj_wrong_verb_wrong), "all_wrong": sum(all_wrong), "missed": sum(missed)}
 
-
-    @torch.no_grad()
-    def cache_hico(self, dataloader, cache_dir='matlab'):
-        net = self._state.net
-        net.eval()
-
-        dataset = dataloader.dataset.dataset
-        conversion = torch.from_numpy(np.asarray(
-            dataset.object_n_verb_to_interaction, dtype=float
-        ))
-        object2int = dataset.object_to_interaction
-
-        # Include empty images when counting
-        nimages = len(dataset.annotations)
-        all_results = np.empty((600, nimages), dtype=object)
-
-        for i, batch in enumerate(tqdm(dataloader)):
-            inputs = pocket.ops.relocate_to_cuda(batch[0])
-            output = net(inputs)
-
-            # Skip images without detections
-            if output is None or len(output) == 0:
-                continue
-            # Batch size is fixed as 1 for inference
-            assert len(output) == 1, f"Batch size is not 1 but {len(output)}."
-            output = pocket.ops.relocate_to_cpu(output[0], ignore=True)
-            # NOTE Index i is the intra-index amongst images excluding those
-            # without ground truth box pairs
-            image_idx = dataset._idx[i]
-            # Format detections
-            boxes = output['boxes']
-            boxes_h, boxes_o = boxes[output['pairing']].unbind(0)
-            objects = output['objects']
-            scores = output['scores']
-            verbs = output['labels']
-            interactions = conversion[objects, verbs]
-            # Rescale the boxes to original image size
-            ow, oh = dataset.image_size(i)
-            h, w = output['size']
-            scale_fct = torch.as_tensor([
-                ow / w, oh / h, ow / w, oh / h
-            ]).unsqueeze(0)
-            boxes_h *= scale_fct
-            boxes_o *= scale_fct
-
-            # Convert box representation to pixel indices
-            boxes_h[:, 2:] -= 1
-            boxes_o[:, 2:] -= 1
-
-            # Group box pairs with the same predicted class
-            permutation = interactions.argsort()
-            boxes_h = boxes_h[permutation]
-            boxes_o = boxes_o[permutation]
-            interactions = interactions[permutation]
-            scores = scores[permutation]
-
-            # Store results
-            unique_class, counts = interactions.unique(return_counts=True)
-            n = 0
-            for cls_id, cls_num in zip(unique_class, counts):
-                all_results[cls_id.long(), image_idx] = torch.cat([
-                    boxes_h[n: n + cls_num],
-                    boxes_o[n: n + cls_num],
-                    scores[n: n + cls_num, None]
-                ], dim=1).numpy()
-                n += cls_num
-        
-        # Replace None with size (0,0) arrays
-        for i in range(600):
-            for j in range(nimages):
-                if all_results[i, j] is None:
-                    all_results[i, j] = np.zeros((0, 0))
-        if not os.path.exists(cache_dir):
-            os.makedirs(cache_dir)
-        # Cache results
-        for object_idx in range(80):
-            interaction_idx = object2int[object_idx]
-            sio.savemat(
-                os.path.join(cache_dir, f'detections_{(object_idx + 1):02d}.mat'),
-                dict(all_boxes=all_results[interaction_idx])
-            )
-
-    @torch.no_grad()
-    def cache_vcoco(self, dataloader, cache_dir='vcoco_cache'):
-        net = self._state.net
-        net.eval()
-
-        dataset = dataloader.dataset.dataset
-        all_results = []
-        for i, batch in enumerate(tqdm(dataloader)):
-            inputs = pocket.ops.relocate_to_cuda(batch[0])
-            output = net(inputs)
-
-            # Skip images without detections
-            if output is None or len(output) == 0:
-                continue
-            # Batch size is fixed as 1 for inference
-            assert len(output) == 1, f"Batch size is not 1 but {len(output)}."
-            output = pocket.ops.relocate_to_cpu(output[0], ignore=True)
-            # NOTE Index i is the intra-index amongst images excluding those
-            # without ground truth box pairs
-            image_id = dataset.image_id(i)
-            # Format detections
-            boxes = output['boxes']
-            boxes_h, boxes_o = boxes[output['pairing']].unbind(0)
-            scores = output['scores']
-            actions = output['labels']
-            # Rescale the boxes to original image size
-            ow, oh = dataset.image_size(i)
-            h, w = output['size']
-            scale_fct = torch.as_tensor([
-                ow / w, oh / h, ow / w, oh / h
-            ]).unsqueeze(0)
-            boxes_h *= scale_fct
-            boxes_o *= scale_fct
-
-            for bh, bo, s, a in zip(boxes_h, boxes_o, scores, actions):
-                a_name = dataset.actions[a].split()
-                result = CacheTemplate(image_id=image_id, person_box=bh.tolist())
-                result[a_name[0] + '_agent'] = s.item()
-                result['_'.join(a_name)] = bo.tolist() + [s.item()]
-                all_results.append(result)
-
-        if not os.path.exists(cache_dir):
-            os.makedirs(cache_dir)
-        with open(os.path.join(cache_dir, 'cache.pkl'), 'wb') as f:
-            # Use protocol 2 for compatibility with Python2
-            pickle.dump(all_results, f, 2)

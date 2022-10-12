@@ -334,6 +334,7 @@ class HICODet(ImageDataset):
         self._verbs = f['verbs']
 
         self.hoi_annotation = {}  # {obj#verb: T/G/-} (string)
+        """
         with open(os.path.join(os.path.dirname(self._anno_file), "HOI.txt")) as file:
             for line in file:
                 splitline = line.split()
@@ -344,8 +345,37 @@ class HICODet(ImageDataset):
                         self.hoi_annotation[(splitline[1], splitline[2])] = 0
                 #else:
                 #    self.hoi_annotation[(splitline[1], splitline[2])] = 0
+        """
+        with open(os.path.join(os.path.dirname(self._anno_file), "HOI.csv")) as file:
+            for line in file:
+                line = line.strip()
+                splitline = line.split(";")
 
+                if splitline[0].isdigit():
+                    affordance = ""
+                    if splitline[5] != "":
+                        affordance = splitline[5]
+                    elif splitline[4] != "":
+                        affordance = splitline[4]
+                    else:
+                        affordance = splitline[3]
 
+                    #affordance = splitline[4] if splitline[4] != "" else splitline[3]
+                    affordance = affordance.strip()
+
+                    if affordance == "T":
+                        self.hoi_annotation[(splitline[1].strip(), splitline[2].strip())] = 1
+                    elif affordance == "G":
+                        self.hoi_annotation[(splitline[1].strip(), splitline[2].strip())] = 0
+                    else:
+                        print(splitline)
+                else:
+                    print(splitline)
+            #print(len(self.hoi_annotation))
+                #else:
+                #    self.hoi_annotation[(splitline[1], splitline[2])] = 0
+
+        #exit()
         self.label2id = {
             "N/A": 0,
             "airplane": 5,
@@ -555,12 +585,20 @@ class HICODet(ImageDataset):
                 #if objstr != "bicycle":
                 #    continue
 
+                #if objstr != "car":
+                #    continue
+
+                if verbstr != "wield":
+                    continue
+
                 #if verbstr != "drive":
+                #    continue
+
+                #if objstr != "car" or verbstr != "drive":
                 #    continue
 
                 #if objstr != "book" or verbstr != "read":
                 #    continue
-
 
                 if (objstr.replace(" ", "_"), verbstr) not in self.hoi_annotation:
                     continue
@@ -611,14 +649,18 @@ class HICODet(ImageDataset):
 
 if __name__ == "__main__":
     os.chdir("..")
+    #dataset = HICODet(
+    #    root=os.path.join("../HicoDetDataset", 'hico_20160224_det/images', "test2015"),
+    #    anno_file=os.path.join("../HicoDetDataset", 'instances_{}.json'.format("test2015")),
+    #    target_transform=pocket.ops.ToTensor(input_format='dict')
+    #)
     dataset = HICODet(
-        root=os.path.join("../HicoDetDataset", 'hico_20160224_det/images', "test2015"),
-        anno_file=os.path.join("../HicoDetDataset", 'instances_{}.json'.format("test2015")),
+        root=os.path.join("D:/Corpora/HICO-DET", 'hico_20160224_det/images', "train2015"),
+        anno_file=os.path.join("D:/Corpora/HICO-DET", 'instances_{}.json'.format("train2015")),
         target_transform=pocket.ops.ToTensor(input_format='dict')
     )
     #print(dataset.filename(4))
-    data = dataset[4]
-    print(data)
+    print(len(dataset))
     #print(dataset.anno_interaction)
     #print(dataset.interactions)
     #print(dataset[0])
