@@ -334,28 +334,16 @@ class HICODet(ImageDataset):
         self._verbs = f['verbs']
 
         self.hoi_annotation = {}  # {obj#verb: T/G/-} (string)
-        """
-        with open(os.path.join(os.path.dirname(self._anno_file), "HOI.txt")) as file:
-            for line in file:
-                splitline = line.split()
-                if len(splitline) > 3:
-                    if splitline[3] == "T":
-                        self.hoi_annotation[(splitline[1], splitline[2])] = 1
-                    elif splitline[3] == "G":
-                        self.hoi_annotation[(splitline[1], splitline[2])] = 0
-                #else:
-                #    self.hoi_annotation[(splitline[1], splitline[2])] = 0
-        """
-        with open(os.path.join(os.path.dirname(self._anno_file), "HOI.csv")) as file:
+
+
+        with open(os.path.join(os.path.dirname(self._anno_file), "textual_annotations.csv")) as file:
             for line in file:
                 line = line.strip()
                 splitline = line.split(";")
 
                 if splitline[0].isdigit():
                     affordance = ""
-                    if splitline[5] != "":
-                        affordance = splitline[5]
-                    elif splitline[4] != "":
+                    if splitline[4] != "":
                         affordance = splitline[4]
                     else:
                         affordance = splitline[3]
@@ -367,15 +355,8 @@ class HICODet(ImageDataset):
                         self.hoi_annotation[(splitline[1].strip(), splitline[2].strip())] = 1
                     elif affordance == "G":
                         self.hoi_annotation[(splitline[1].strip(), splitline[2].strip())] = 0
-                    else:
-                        print(splitline)
-                else:
-                    print(splitline)
-            #print(len(self.hoi_annotation))
-                #else:
-                #    self.hoi_annotation[(splitline[1], splitline[2])] = 0
 
-        #exit()
+        
         self.label2id = {
             "N/A": 0,
             "airplane": 5,
@@ -588,8 +569,8 @@ class HICODet(ImageDataset):
                 #if objstr != "car":
                 #    continue
 
-                if verbstr != "wield":
-                    continue
+                #if verbstr != "wield":
+                #    continue
 
                 #if verbstr != "drive":
                 #    continue
@@ -602,6 +583,7 @@ class HICODet(ImageDataset):
 
                 if (objstr.replace(" ", "_"), verbstr) not in self.hoi_annotation:
                     continue
+                    
                 newverbid = self.hoi_annotation[(objstr.replace(" ", "_"), verbstr)]
 
                 for merged_idx, (merged_hbox, merged_obox, merged_o, merged_v) in enumerate(

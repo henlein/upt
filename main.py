@@ -163,12 +163,12 @@ if __name__ == '__main__':
     # CUDA_VISIBLE_DEVICES=1 python main.py --world-size 1 --eval --resume /mnt/hydra/ssd4/team/henlein/upt-eval/models/desired-lovebird-3/ckpt_41940_20.pt
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--lr-head', default=0.00013, type=float) # <----
+    parser.add_argument('--lr-head', default=0.00013, type=float)  # <----
     parser.add_argument('--batch-size', default=8, type=int)
-    parser.add_argument('--weight-decay', default=0.00047, type=float) # <----
+    parser.add_argument('--weight-decay', default=0.00047, type=float)  # <----
     parser.add_argument('--epochs', default=20, type=int)
-    parser.add_argument('--lr-drop', default=82, type=int) # <----
-    parser.add_argument('--clip-max-norm', default=0.18, type=float) # <----
+    parser.add_argument('--lr-drop', default=82, type=int)  # <----
+    parser.add_argument('--clip-max-norm', default=0.18, type=float)  # <----
     """
     parser.add_argument('--lr-head', default=1e-4, type=float)
     parser.add_argument('--batch-size', default=8, type=int)
